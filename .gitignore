@@ -1,0 +1,13 @@
+.env
+.venv/
+.venv-1/
+__pycache__/
+*.py[cod]
+*.db
+agent_memory.db
+.streamlit/secrets.toml
+.streamlit/cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log

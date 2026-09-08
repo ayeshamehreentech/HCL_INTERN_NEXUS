@@ -1,0 +1,15 @@
+streamlit>=1.37
+python-dotenv>=1.0
+
+groq>=0.30
+langchain-groq>=0.3
+
+langchain-community>=0.3
+langchain-text-splitters>=0.3
+
+fastembed>=0.3
+faiss-cpu>=1.8
+
+pypdf>=5.0
+requests>=2.31
+reportlab>=4.0
