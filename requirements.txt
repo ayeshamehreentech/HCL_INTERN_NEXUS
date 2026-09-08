@@ -13,3 +13,4 @@ faiss-cpu>=1.8
 pypdf>=5.0
 requests>=2.31
 reportlab>=4.0
+duckduckgo-search>=6.3
