@@ -34,12 +34,24 @@ def render_student_messages():
         role = "user" if message["sender_id"] == user_id else "assistant"
         with st.chat_message(role):
             st.write(message["message"])
-    message = st.chat_input(
-        "Ask a doubt or report an absence/meeting problem...",
+    message = st.text_area(
+        "Ask a doubt to your mentor",
+        placeholder=(
+            "Write your doubt, absence information, or meeting problem here..."
+        ),
+        height=120,
         key="student_private_message",
     )
-    if message:
+    if st.button(
+        "📨 Send doubt to mentor",
+        key="send_student_doubt",
+        use_container_width=True,
+    ):
+        if not message.strip():
+            st.warning("Write a doubt or message before sending.")
+            return
         send_private_message(user_id, mentor_id, message)
+        st.success("Your doubt was sent privately to your mentor.")
         st.rerun()
 
 
