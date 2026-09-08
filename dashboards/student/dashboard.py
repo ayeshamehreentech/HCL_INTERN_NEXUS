@@ -152,7 +152,7 @@ def render_student_dashboard():
     tabs = st.tabs(
         [
             "🔔 Notifications",
-            f"💬 Chat ({count_unread_messages(st.session_state.get('user_id'))})",
+            f"📝 Doubt Clarification ({count_unread_messages(st.session_state.get('user_id'))})",
             "📚 Learning",
             "📅 Meetings",
             "🔗 Resources",

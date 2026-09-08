@@ -154,7 +154,7 @@ def render_mentor_dashboard():
             ] = "resources"
 
     if st.button(
-        f"💬 Private chats ({count_unread_messages(st.session_state.get('user_id'))})",
+        f"📝 Doubt Clarifications ({count_unread_messages(st.session_state.get('user_id'))})",
         use_container_width=True,
     ):
         st.session_state["mentor_page"] = "messages"

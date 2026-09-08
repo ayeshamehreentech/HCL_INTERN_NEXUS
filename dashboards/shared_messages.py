@@ -23,10 +23,10 @@ def _assigned_mentor(student_id):
 def render_student_messages():
     user_id = st.session_state.get("user_id")
     mentor_id = _assigned_mentor(user_id)
-    st.subheader("💬 Private chat with your mentor")
-    st.caption("Only you and your assigned mentor can see these messages.")
+    st.subheader("📝 Doubt Clarification with your mentor")
+    st.caption("Only you and your assigned mentor can see these clarifications.")
     if not mentor_id:
-        st.info("Your mentor chat will appear after a meeting is assigned.")
+        st.info("Doubt clarification will appear after a meeting is assigned.")
         return
     messages = list_private_messages(user_id, mentor_id)
     mark_messages_read(user_id, mentor_id)
@@ -53,10 +53,10 @@ def render_mentor_messages():
         (user_id,),
     ).fetchall()
     conn.close()
-    st.subheader("💬 Private student chats")
-    st.caption("Each conversation is visible only to you and that student.")
+    st.subheader("📝 Student Doubt Clarifications")
+    st.caption("Each clarification is visible only to you and that student.")
     if not students:
-        st.info("No student conversations are available yet.")
+        st.info("No student doubt clarifications are available yet.")
         return
     selected = st.selectbox(
         "Student conversation",
