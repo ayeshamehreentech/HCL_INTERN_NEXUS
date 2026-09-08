@@ -123,19 +123,29 @@ def render_meetings():
             st.write(f"Date: {meeting.get('meeting_date', 'To be confirmed')}")
             st.write(f"Time: {meeting.get('meeting_time', 'To be confirmed')}")
             if meeting.get("meeting_link"):
-                if st.button(
-                    "🔗 Join Meeting",
-                    key=f"student_join_{meeting['id']}",
-                    use_container_width=True,
-                ):
-                    mark_joined(meeting["id"])
-                    st.session_state["active_meeting_link"] = meeting["meeting_link"]
-                    st.rerun()
-
-    active_link = st.session_state.get(
-        "active_meeting_link",
-        get_setting("TEAMS_MEETING_LINK"),
-    )
+                join_col, panel_col = st.columns(2)
+                with join_col:
+                    st.link_button(
+                        "🔗 Open Teams",
+                        meeting["meeting_link"],
+                        use_container_width=True,
+                    )
+                with panel_col:
+                    show_key = f"student_show_meeting_{meeting['id']}"
+                    if st.button("🖥️ Show here", key=show_key, use_container_width=True):
+                        mark_joined(meeting["id"])
+                        st.session_state["active_meeting_link"] = meeting["meeting_link"]
+                        st.rerun()
+    default_link = get_setting("TEAMS_MEETING_LINK")
+    active_link = st.session_state.get("active_meeting_link", default_link)
+    if default_link and not meetings:
+        join_col, panel_col = st.columns(2)
+        with join_col:
+            st.link_button("🔗 Open Teams", default_link, use_container_width=True)
+        with panel_col:
+            if st.button("🖥️ Show meeting panel", key="student_show_default_meeting", use_container_width=True):
+                st.session_state["active_meeting_link"] = default_link
+                st.rerun()
     if active_link:
         components.iframe(active_link, height=520, scrolling=True)
     else:

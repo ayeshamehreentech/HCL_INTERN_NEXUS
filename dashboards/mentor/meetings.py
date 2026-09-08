@@ -68,13 +68,22 @@ def render_mentor_meetings():
                 st.write(f"Time: {meeting.get('meeting_time', 'N/A')}")
                 link = meeting.get("meeting_link", "")
 
-                if link and st.button(
-                    "🔗 Join Meeting",
-                    key=f"mentor_join_{meeting['id']}",
-                    use_container_width=True,
-                ):
-                    st.session_state["active_mentor_meeting_link"] = link
-                    st.rerun()
+                if link:
+                    join_col, panel_col = st.columns(2)
+                    with join_col:
+                        st.link_button(
+                            "🔗 Open Teams",
+                            link,
+                            use_container_width=True,
+                        )
+                    with panel_col:
+                        if st.button(
+                            "🖥️ Show here",
+                            key=f"mentor_show_meeting_{meeting['id']}",
+                            use_container_width=True,
+                        ):
+                            st.session_state["active_mentor_meeting_link"] = link
+                            st.rerun()
 
                 with st.expander("Edit meeting"):
                     edited_title = st.text_input(

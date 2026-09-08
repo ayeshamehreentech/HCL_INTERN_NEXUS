@@ -1,5 +1,5 @@
 import re
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, quote_plus, urlparse, urlunparse
 
 import streamlit as st
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -220,4 +220,21 @@ def render_resources():
         for resource in articles:
             _resource_card(resource, user_id, current_topic or topic)
     if current_topic and not results:
-        st.info("We couldn't find resources right now. Please try another topic.")
+        st.warning(
+            "No indexed results were returned for this topic. You can still search "
+            "the topic directly on YouTube or the web."
+        )
+        youtube_query, _ = normalize_query(current_topic)
+        link_col, web_col = st.columns(2)
+        with link_col:
+            st.link_button(
+                "Search YouTube",
+                f"https://www.youtube.com/results?search_query={quote_plus(youtube_query)}",
+                use_container_width=True,
+            )
+        with web_col:
+            st.link_button(
+                "Search web articles",
+                f"https://duckduckgo.com/?q={quote_plus(current_topic)}",
+                use_container_width=True,
+            )
