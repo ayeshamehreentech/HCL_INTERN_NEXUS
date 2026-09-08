@@ -4,22 +4,21 @@ import os
 from dotenv import load_dotenv
 from groq import Groq
 
+from .config import get_groq_api_key, get_groq_model
+
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv(
-    "GROQ_MODEL",
-    "openai/gpt-oss-120b"
-)
+GROQ_MODEL = get_groq_model()
 
 
 def get_client():
-    if not GROQ_API_KEY:
+    api_key = get_groq_api_key()
+    if not api_key:
         raise ValueError(
             "GROQ_API_KEY is not configured in .env"
         )
 
-    return Groq(api_key=GROQ_API_KEY)
+    return Groq(api_key=api_key)
 
 
 def generate_learning_plan(

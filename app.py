@@ -6,6 +6,8 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 
+load_dotenv()
+
 from authentication import login_page, signup_page, logout
 from database.connection import init_db, get_connection
 
@@ -16,8 +18,6 @@ from dashboards.admin.dashboard import render_admin_dashboard
 
 
 init_db()
-
-load_dotenv()
 
 st.set_page_config(
     page_title="HCLTech GenAI Forge",
