@@ -11,16 +11,16 @@ from database.meetings import (
     mark_joined,
     save_meeting_transcription,
 )
+from ai.config import get_groq_api_key, get_groq_model, get_setting
 
 
 load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-TEAMS_MEETING_LINK = os.getenv("TEAMS_MEETING_LINK", "")
+GROQ_MODEL = get_groq_model()
 
 
 def get_client():
-    return Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+    api_key = get_groq_api_key()
+    return Groq(api_key=api_key) if api_key else None
 
 
 def transcribe_meeting_audio(audio_bytes):
@@ -132,11 +132,14 @@ def render_meetings():
                     st.session_state["active_meeting_link"] = meeting["meeting_link"]
                     st.rerun()
 
-    active_link = st.session_state.get("active_meeting_link", TEAMS_MEETING_LINK)
+    active_link = st.session_state.get(
+        "active_meeting_link",
+        get_setting("TEAMS_MEETING_LINK"),
+    )
     if active_link:
         components.iframe(active_link, height=520, scrolling=True)
     else:
-        st.warning("Add TEAMS_MEETING_LINK to .env to show the meeting here.")
+        st.warning("Add TEAMS_MEETING_LINK to Streamlit Secrets to show the meeting here.")
 
     st.divider()
     st.subheader("🎙️ Meeting Recording")

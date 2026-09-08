@@ -1,12 +1,8 @@
-import os
-
 import streamlit as st
 import streamlit.components.v1 as components
+from ai.config import get_setting
 from database.meetings import list_meetings, save_meeting, update_meeting
 from database.users import list_users
-
-
-TEAMS_MEETING_LINK = os.getenv("TEAMS_MEETING_LINK", "")
 
 
 def render_mentor_meetings():
@@ -39,7 +35,11 @@ def render_mentor_meetings():
             meeting_meridiem = st.selectbox("AM / PM", ["AM", "PM"], index=1, key="meeting_meridiem")
         meeting_time = f"{meeting_hour:02d}:{meeting_minute:02d} {meeting_meridiem}"
         st.caption(f"Scheduled time: {meeting_time}")
-        meeting_link = st.text_input("Meeting link", value=TEAMS_MEETING_LINK, key="meeting_link")
+        meeting_link = st.text_input(
+            "Meeting link",
+            value=get_setting("TEAMS_MEETING_LINK"),
+            key="meeting_link",
+        )
 
         if st.button("Schedule meeting", use_container_width=True):
             if selected_student and meeting_title.strip() and meeting_link.strip():
