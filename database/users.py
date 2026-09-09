@@ -90,50 +90,24 @@ def create_user(
 # ============================================================
 
 def get_user(email):
-    """
-    Get a user by email.
-
-    Returns:
-        Dictionary containing user information
-        or None if user does not exist.
-    """
-
+    """Return a user safely across both legacy and current SQLite schemas."""
     if not email:
         return None
-
-    email = email.strip().lower()
-
     conn = get_connection()
-    cursor = conn.cursor()
-
     try:
-        cursor.execute(
-            """
-            SELECT
-                id,
-                name,
-                email,
-                role,
-                password_hash,
-                is_active,
-                start_date,
-                end_date,
-                last_login,
-                created_at
-            FROM users
-            WHERE email = ?
-            LIMIT 1
-            """,
-            (email,)
-        )
-
-        row = cursor.fetchone()
-
-        if row:
-            return dict(row)
-
-        return None
-
+        row = conn.execute("SELECT * FROM users WHERE email = ? LIMIT 1", (email.strip().lower(),)).fetchone()
+        if not row:
+            return None
+        user = dict(row)
+        # Legacy deployments used password instead of password_hash and may omit metadata.
+        user["password_hash"] = user.get("password_hash") or user.get("password") or ""
+        user.setdefault("is_active", 1)
+        user.setdefault("name", user.get("username") or user.get("email", ""))
+        user.setdefault("start_date", None)
+        user.setdefault("end_date", None)
+        user.setdefault("last_login", None)
+        user.setdefault("created_at", None)
+        return user
     finally:
         conn.close()
 
