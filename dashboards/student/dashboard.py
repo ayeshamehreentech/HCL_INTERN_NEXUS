@@ -21,14 +21,14 @@ from .coding_lab import render_coding_lab
 
 
 def render_notifications(notices):
-    """Render mentor notices inside the dedicated notification tab."""
+    """Render mentor notices inside the dedicated notices tab."""
     st.markdown(
         f"<div class='notice-alert'>🔔 <strong>{len(notices)} notice"
         f"{'s' if len(notices) != 1 else ''}</strong> from your mentor</div>",
         unsafe_allow_html=True,
     )
     if not notices:
-        st.info("No notifications yet.")
+        st.info("No notices yet.")
         return
 
     st.markdown(
@@ -152,7 +152,7 @@ def render_student_dashboard():
 
     tabs = st.tabs(
         [
-            "🔔 Notifications",
+            "📌 Notices",
             f"📝 Doubt Clarification ({count_unread_messages(st.session_state.get('user_id'))})",
             "📚 Learning",
             "📅 Meetings",
