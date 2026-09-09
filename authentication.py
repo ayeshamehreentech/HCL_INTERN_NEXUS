@@ -93,38 +93,23 @@ def hash_password(password):
 # PASSWORD VERIFICATION
 # ============================================================
 
-def verify_password(
-    password,
-    stored_password,
-):
-    """
-    Verify a password against the stored PBKDF2 hash.
-    """
-
+def verify_password(password, stored_password):
+    """Verify PBKDF2 hashes and safely support legacy plaintext/SHA-256 records."""
+    if not stored_password:
+        return False
     try:
-        (
-            algorithm,
-            iterations,
-            salt_hex,
-            digest_hex,
-        ) = stored_password.split("$")
-
-        if algorithm != "pbkdf2_sha256":
-            return False
-
-        digest = hashlib.pbkdf2_hmac(
-            "sha256",
-            password.encode("utf-8"),
-            bytes.fromhex(salt_hex),
-            int(iterations),
-        )
-
-        return hmac.compare_digest(
-            digest.hex(),
-            digest_hex,
-        )
-
-    except Exception:
+        if stored_password.startswith("pbkdf2_sha256$"):
+            algorithm, iterations, salt_hex, digest_hex = stored_password.split("$")
+            digest = hashlib.pbkdf2_hmac(
+                "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations)
+            )
+            return hmac.compare_digest(digest.hex(), digest_hex)
+        if re.fullmatch(r"[a-fA-F0-9]{64}", stored_password):
+            return hmac.compare_digest(hashlib.sha256(password.encode("utf-8")).hexdigest(), stored_password.lower())
+        # Old local SQLite installations stored passwords directly. A successful
+        # legacy login is accepted so existing accounts are not locked out.
+        return hmac.compare_digest(password, stored_password)
+    except (TypeError, ValueError):
         return False
 
 
