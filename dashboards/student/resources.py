@@ -2,6 +2,7 @@ import re
 from urllib.parse import parse_qs, quote_plus, urlparse, urlunparse
 
 import streamlit as st
+import streamlit.components.v1 as components
 from langchain_community.tools import DuckDuckGoSearchRun
 
 from database.resources import (
@@ -232,7 +233,10 @@ def render_resources():
         for resource in articles:
             _resource_card(resource, user_id, current_topic or topic)
     if current_topic and not results:
-        st.info(
-            "DuckDuckGo did not return a playable video yet. Try a more specific topic "
-            "such as 'transformers attention tutorial'."
+        clean_query = quote_plus(current_topic + " tutorial -shorts")
+        st.subheader("YouTube learning results")
+        st.caption("Clean learning-only search: no Shorts feed or unrelated recommendations.")
+        components.html(
+            f'<iframe width="100%" height="430" src="https://www.youtube-nocookie.com/embed?listType=search&list={clean_query}&rel=0&modestbranding=1" title="YouTube learning search" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>',
+            height=440,
         )
