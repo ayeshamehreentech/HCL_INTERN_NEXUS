@@ -4,6 +4,7 @@ from urllib.request import Request, urlopen
 
 import streamlit as st
 from langchain_community.tools import DuckDuckGoSearchRun
+from googleapiclient.discovery import build
 
 from database.connection import get_connection
 from database.resources import list_resources, list_topic_history, save_topic_history, save_user_resource
@@ -81,9 +82,72 @@ def _video_card(video, index):
             st.rerun()
 
 
+
+def playlist_id(playlist_url_or_id):
+    """Return the playlist ID from a YouTube playlist URL or a raw ID."""
+    value = (playlist_url_or_id or "").strip()
+    return parse_qs(urlparse(value).query).get("list", [value])[0]
+
+
+def get_playlist_videos(playlist_url_or_id):
+    """Fetch titles, IDs and thumbnails using the YouTube Data API."""
+    api_key = st.secrets.get("YOUTUBE_API_KEY")
+    playlist = playlist_id(playlist_url_or_id)
+    if not api_key:
+        raise RuntimeError("Add YOUTUBE_API_KEY to Streamlit secrets before loading a playlist.")
+    if not playlist:
+        raise ValueError("Enter a YouTube playlist URL or playlist ID.")
+    youtube = build("youtube", "v3", developerKey=api_key, cache_discovery=False)
+    videos, page_token = [], None
+    while True:
+        response = youtube.playlistItems().list(part="snippet", playlistId=playlist, maxResults=50, pageToken=page_token).execute()
+        for item in response.get("items", []):
+            snippet = item.get("snippet", {})
+            video_id = snippet.get("resourceId", {}).get("videoId")
+            if not video_id or snippet.get("title") == "Private video":
+                continue
+            thumbnails = snippet.get("thumbnails", {})
+            image = (thumbnails.get("medium") or thumbnails.get("high") or thumbnails.get("default") or {}).get("url")
+            videos.append({
+                "key": video_id, "url": "https://www.youtube.com/watch?v=" + video_id,
+                "title": snippet.get("title", "YouTube lesson"),
+                "channel": snippet.get("videoOwnerChannelTitle") or snippet.get("channelTitle", "YouTube"),
+                "language": "Playlist lesson", "duration": "Open in player",
+                "thumbnail": image or "https://i.ytimg.com/vi/{}/hqdefault.jpg".format(video_id),
+            })
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+    return videos
+
+
+def render_playlist_loader():
+    with st.expander("Load a YouTube playlist"):
+        playlist_ref = st.text_input("Playlist URL or ID", key="youtube_playlist_ref")
+        if st.button("Load playlist in this tab", key="load_youtube_playlist"):
+            try:
+                st.session_state["playlist_videos"] = get_playlist_videos(playlist_ref)
+                st.success("Playlist loaded. Select a lesson to play it here.")
+            except Exception as error:
+                st.error(str(error))
+        playlist_videos = st.session_state.get("playlist_videos", [])
+        if playlist_videos:
+            st.caption("{} playlist lessons available".format(len(playlist_videos)))
+            for start in range(0, len(playlist_videos), 3):
+                columns = st.columns(3)
+                for column, video in zip(columns, playlist_videos[start:start + 3]):
+                    with column:
+                        st.image(video["thumbnail"])
+                        st.caption(video["title"])
+                        if st.button("Play in app", key="playlist_" + video["key"]):
+                            st.session_state["selected_resource_video"] = video
+                            st.rerun()
+
+
 def render_resources():
     st.subheader("🧭 AI Learning Resources")
     st.caption("Focused learning videos discovered through DuckDuckGo. No Shorts or external navigation.")
+    render_playlist_loader()
     user_id = st.session_state.get("user_id")
     topic = st.text_input("Search a topic", placeholder="Transformers in Hindi", key="mentor_resources_query")
     history = list_topic_history(user_id) if user_id else []
