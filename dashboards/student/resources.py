@@ -1,5 +1,6 @@
 import re
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote_plus, urlparse
+from urllib.request import Request, urlopen
 
 import streamlit as st
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -33,6 +34,19 @@ def _discover(topic):
         if video and video not in seen:
             seen.add(video)
             videos.append({"key": video, "url": "https://www.youtube.com/watch?v=" + video, "title": "{} learning video {}".format(query.title(), len(videos) + 1), "channel": "YouTube educational result", "language": language, "duration": "Duration shown in player", "thumbnail": "https://i.ytimg.com/vi/{}/hqdefault.jpg".format(video)})
+    if not videos:
+        try:
+            search_url = "https://www.youtube.com/results?search_query=" + quote_plus(query + " " + language + " tutorial -shorts")
+            request = Request(search_url, headers={"User-Agent": "Mozilla/5.0"})
+            page = urlopen(request, timeout=8).read().decode("utf-8", errors="ignore")
+            for video in re.findall(r'"videoId":"([\w-]{11})"', page):
+                if video not in seen:
+                    seen.add(video)
+                    videos.append({"key": video, "url": "https://www.youtube.com/watch?v=" + video, "title": "{} learning video {}".format(query.title(), len(videos) + 1), "channel": "YouTube search result", "language": language, "duration": "Duration shown in player", "thumbnail": "https://i.ytimg.com/vi/{}/hqdefault.jpg".format(video)})
+                if len(videos) == 12:
+                    break
+        except Exception:
+            pass
     return videos[:12]
 
 
