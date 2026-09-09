@@ -1,91 +1,99 @@
-import sqlite3
-from pathlib import Path
+"""Supabase PostgreSQL persistence for HCL Intern Nexus."""
+import os
+import re
+from urllib.parse import quote_plus
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DB_DIR = BASE_DIR / "database"
-DB_DIR.mkdir(exist_ok=True)
-DB_PATH = DB_DIR / "app.db"
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+
+def _secret(name):
+    value = os.getenv(name)
+    if value:
+        return value
+    try:
+        import streamlit as st
+        return st.secrets.get(name)
+    except Exception:
+        return None
+
+
+def _database_url():
+    url = _secret("SUPABASE_DB_URL")
+    if url:
+        return url
+    host = _secret("SUPABASE_DB_HOST")
+    password = _secret("SUPABASE_DB_PASSWORD")
+    if host and password:
+        return "postgresql://postgres:{}@{}:5432/postgres".format(quote_plus(password), host)
+    raise RuntimeError("Supabase is not configured. Add SUPABASE_DB_URL to Streamlit secrets.")
+
+
+def _translate(statement):
+    sql = statement.strip()
+    if sql.upper().startswith("PRAGMA TABLE_INFO("):
+        table = sql.split("(", 1)[1].split(")", 1)[0].strip(" '\"")
+        return "SELECT column_name AS name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = %s", (table,)
+    return sql.replace("?", "%s"), None
+
+
+class Cursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self.lastrowid = None
+
+    def execute(self, statement, parameters=None):
+        sql, generated = _translate(statement)
+        values = generated if generated is not None else parameters
+        upper = sql.lstrip().upper()
+        needs_id = upper.startswith("INSERT INTO") and " RETURNING " not in upper
+        if needs_id:
+            sql = sql.rstrip().rstrip(";") + " RETURNING id"
+        self._cursor.execute(sql, values)
+        if needs_id:
+            row = self._cursor.fetchone()
+            self.lastrowid = row["id"] if row else None
+        return self
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class Connection:
+    def __init__(self):
+        self._conn = psycopg2.connect(_database_url(), cursor_factory=RealDictCursor, sslmode="require")
+
+    def cursor(self):
+        return Cursor(self._conn.cursor())
+
+    def execute(self, statement, parameters=None):
+        return self.cursor().execute(statement, parameters)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
 
 
 def get_connection():
-    """Return a SQLite connection that exposes columns by name."""
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _migrate_users_table(conn):
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
-    for name, definition in {
-        "name": "TEXT", "role": "TEXT DEFAULT 'student'", "password_hash": "TEXT",
-        "is_active": "INTEGER DEFAULT 1", "start_date": "TEXT", "end_date": "TEXT",
-        "last_login": "TEXT",
-    }.items():
-        if name not in columns:
-            conn.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
-    if "username" in columns:
-        conn.execute("UPDATE users SET name = username WHERE name IS NULL OR name = ''")
-    if "password" in columns:
-        conn.execute("UPDATE users SET password_hash = password WHERE password_hash IS NULL OR password_hash = ''")
-    conn.execute("UPDATE users SET role = 'student' WHERE role IS NULL OR role = ''")
-    conn.execute("UPDATE users SET is_active = 1 WHERE is_active IS NULL")
+    """Return a durable Supabase PostgreSQL connection."""
+    return Connection()
 
 
 def init_db():
-    """Create and safely upgrade the portal schema."""
+    """Verify that the Supabase schema is reachable."""
     conn = get_connection()
     try:
-        conn.executescript("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            role TEXT NOT NULL DEFAULT 'student',
-            password_hash TEXT NOT NULL,
-            is_active INTEGER NOT NULL DEFAULT 1,
-            start_date TEXT,
-            end_date TEXT,
-            last_login TEXT
-        );
-        CREATE TABLE IF NOT EXISTS meetings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER, mentor_id INTEGER,
-            title TEXT NOT NULL, meeting_date TEXT, meeting_time TEXT, meeting_link TEXT,
-            status TEXT DEFAULT 'scheduled', created_at TEXT
-        );
-        CREATE TABLE IF NOT EXISTS meeting_transcriptions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, transcript TEXT NOT NULL,
-            summary TEXT, created_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS notices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, message TEXT NOT NULL,
-            audience TEXT DEFAULT 'student', created_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS resources (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT NOT NULL, title TEXT NOT NULL,
-            url TEXT NOT NULL, resource_type TEXT NOT NULL DEFAULT 'blog', created_by INTEGER,
-            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS resource_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, topic TEXT NOT NULL,
-            opened_at TEXT NOT NULL, UNIQUE(user_id, topic)
-        );
-        CREATE TABLE IF NOT EXISTS user_resources (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, resource_key TEXT NOT NULL,
-            resource_type TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, topic TEXT NOT NULL,
-            saved INTEGER NOT NULL DEFAULT 0, viewed INTEGER NOT NULL DEFAULT 0, last_viewed_at TEXT,
-            UNIQUE(user_id, resource_key)
-        );
-        CREATE TABLE IF NOT EXISTS private_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, sender_id INTEGER NOT NULL, recipient_id INTEGER NOT NULL,
-            message TEXT NOT NULL, created_at TEXT NOT NULL, read_at TEXT
-        );
-        CREATE TABLE IF NOT EXISTS coding_lab_attempts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, question_key TEXT NOT NULL,
-            category TEXT NOT NULL, code TEXT NOT NULL, passed INTEGER NOT NULL DEFAULT 0,
-            feedback TEXT, created_at TEXT NOT NULL
-        );
-        """)
-        _migrate_users_table(conn)
-        conn.commit()
+        conn.execute("SELECT 1").fetchone()
     finally:
         conn.close()
