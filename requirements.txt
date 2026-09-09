@@ -14,3 +14,4 @@ pypdf>=5.0
 requests>=2.31
 reportlab>=4.0
 duckduckgo-search>=6.3
+google-api-python-client>=2.0
