@@ -1,23 +1,29 @@
-"""Beginner-friendly, Deep-Agent-style Coding Lab."""
 from datetime import datetime
+
 import streamlit as st
+from langchain_community.tools import DuckDuckGoSearchRun
 from database.connection import get_connection
 
-QUESTIONS = {
-    "Beginner": [
-        {"key": "b1", "title": "Print your name", "prompt": "Write Python code that prints your name.", "checks": ["print", "(", ")"], "concept": "A function call sends text to the screen."},
-        {"key": "b2", "title": "Two numbers", "prompt": "Store 5 and 7 in variables, then print their sum.", "checks": ["=", "print", "+"], "concept": "Variables remember values; + combines numbers."},
-        {"key": "b3", "title": "Greeting", "prompt": "Create a variable called name and print a friendly greeting.", "checks": ["name", "=", "print"], "concept": "A variable lets one program work with different names."}
-    ],
-    "Intermediate": [
-        {"key": "i1", "title": "Even or odd", "prompt": "Ask for a number and print whether it is even or odd.", "checks": ["input", "%", "if", "else"], "concept": "Use remainder (%) to test divisibility and if/else to choose a path."},
-        {"key": "i2", "title": "Count to five", "prompt": "Use a loop to print the numbers 1 through 5.", "checks": ["for", "range", "print"], "concept": "A loop repeats a clear instruction."}
-    ],
-    "Advanced": [
-        {"key": "a1", "title": "Right triangle", "prompt": "Print a right triangle of stars with 5 rows using a loop.", "checks": ["for", "range", "*", "print"], "concept": "Patterns come from changing one small value each loop."},
-        {"key": "a2", "title": "Number pyramid", "prompt": "Print rows of 1, 22, 333, 4444, 55555 using a loop.", "checks": ["for", "range", "str", "print"], "concept": "Convert a number to text, then repeat it by the row count."}
-    ]
-}
+SEEDS = [
+    ("Beginner", "Print your name", "Write Python that prints your name.", ["print", "("], "print() sends text to the screen."),
+    ("Beginner", "Add two numbers", "Store 5 and 7, then print their sum.", ["=", "print", "+"], "Variables store values and + adds numbers."),
+    ("Beginner", "Greeting", "Create name and print a greeting using it.", ["name", "=", "print"], "A variable can be reused in an output."),
+    ("Beginner", "Favourite colour", "Ask for a favourite colour and print it.", ["input", "print"], "input() collects text."),
+    ("Beginner", "Rectangle area", "Store length and width, then print their area.", ["=", "print", "*"], "Multiply two measurements."),
+    ("Beginner", "First list", "Create a list of three fruits and print it.", ["[", "]", "print"], "Lists keep several values together."),
+    ("Intermediate", "Even or odd", "Ask for a number and print whether it is even or odd.", ["input", "%", "if", "else"], "Use remainder (%) and if/else."),
+    ("Intermediate", "Count to five", "Use a loop to print 1 through 5.", ["for", "range", "print"], "A for loop repeats an instruction."),
+    ("Intermediate", "Largest of two", "Read two numbers and print the larger one.", ["input", "if", "else"], "A comparison controls a decision."),
+    ("Intermediate", "Sum a list", "Create a list of numbers and print their sum.", ["[", "sum", "print"], "sum() adds a collection."),
+    ("Intermediate", "Multiplication table", "Print the multiplication table for 3.", ["for", "range", "print", "*"], "Change one value each loop pass."),
+    ("Intermediate", "Password check", "Ask for a password and print success or retry.", ["input", "if", "else"], "Compare input to the expected value."),
+    ("Advanced", "Right triangle", "Print a right triangle of stars with five rows.", ["for", "range", "*", "print"], "Patterns grow one row at a time."),
+    ("Advanced", "Number pyramid", "Print 1, 22, 333, 4444, 55555 using a loop.", ["for", "range", "str", "print"], "Convert a number to text and repeat it."),
+    ("Advanced", "FizzBuzz", "Print 1 to 20; use Fizz for 3 and Buzz for 5.", ["for", "%", "if", "elif"], "Test combined conditions first."),
+    ("Advanced", "Palindrome", "Check whether a word reads the same backwards.", ["if", "[::-1]"], "Compare text with its reverse."),
+    ("Advanced", "Prime check", "Decide whether a number is prime.", ["for", "range", "%", "if"], "Try possible divisors."),
+    ("Advanced", "Nested pattern", "Print a 4 by 4 square of stars.", ["for", "range", "print"], "One loop creates rows; another builds a row."),
+]
 
 def _attempt_count(user_id):
     conn = get_connection()
@@ -26,48 +32,65 @@ def _attempt_count(user_id):
     finally:
         conn.close()
 
-def _save_attempt(user_id, question, category, code, passed, feedback):
+def _save_attempt(user_id, question, code, passed, feedback):
     conn = get_connection()
     try:
-        conn.execute("INSERT INTO coding_lab_attempts (user_id, question_key, category, code, passed, feedback, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (user_id, question["key"], category, code, int(passed), feedback, datetime.now().isoformat()))
+        conn.execute("INSERT INTO coding_lab_attempts (user_id, question_key, category, code, passed, feedback, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (user_id, question["key"], question["category"], code, int(passed), feedback, datetime.now().isoformat()))
         conn.commit()
     finally:
         conn.close()
 
+def _next_question(completed, level):
+    pool = [seed for seed in SEEDS if seed[0] == level]
+    round_number = completed // len(pool) + 1
+    category, title, prompt, checks, concept = pool[completed % len(pool)]
+    return {"key": "python-{}-{}".format(level.lower(), completed + 1), "category": category, "title": "{} · Practice {}".format(title, round_number), "prompt": prompt, "checks": checks, "concept": concept}
+
 def _coach(question, code):
-    missing = [token for token in question["checks"] if token not in code]
     if not code.strip():
-        return False, "Start with one tiny step. Read the first sentence of the question, then write only that line."
+        return False, "Plan first: write one small line that solves the first step. Predict what it will output."
+    missing = [token for token in question["checks"] if token not in code]
     if missing:
-        return False, "You are close. Your next focus is: {}. {} Try adding it, then trace what happens first, next, and last.".format(missing[0], question["concept"])
-    return True, "Well done — your solution contains the core logic. {} Now explain the code aloud in your own words.".format(question["concept"])
+        return False, "Next small fix: add {}. {} Then trace the code one line at a time.".format(missing[0], question["concept"])
+    return True, "Core logic found. {} Explain each line, then unlock the next challenge.".format(question["concept"])
+
+def _web_guidance(question):
+    try:
+        return DuckDuckGoSearchRun().run("Python tutorial {} {}".format(question["title"], question["concept"]))
+    except Exception:
+        return "Web guidance is temporarily unavailable. Use the plan and write one line at a time."
 
 def render_coding_lab():
-    st.subheader("Coding Lab")
-    st.caption("Your AI learning loop: understand → plan → write → check → improve. Start small; every correct question builds your logic.")
+    st.subheader("🧪 Continuous Python Coding Lab")
+    st.caption("Plan → write → check → hint → improve → next question. The practice path continues beyond 50 questions.")
     user_id = st.session_state.get("user_id")
     if not user_id:
-        st.error("Please sign in again to save Coding Lab progress.")
+        st.error("Please sign in again to save your practice.")
         return
     completed = _attempt_count(user_id)
-    st.progress(min(completed / 50, 1.0), text="{}/50 mastery questions completed".format(completed))
-    if completed >= 50:
-        st.success("You have reached the 50-question milestone. You are ready to practise small logic and pattern programs.")
-    category = st.selectbox("Choose your level", list(QUESTIONS), key="coding_lab_category")
-    question_index = st.selectbox("Choose a challenge", range(len(QUESTIONS[category])), format_func=lambda i: QUESTIONS[category][i]["title"])
-    question = QUESTIONS[category][question_index]
+    st.progress(min(completed / 50, 1.0), text="{}/50 foundation questions completed · practice continues".format(completed))
+    level = st.selectbox("Starting level", ["Beginner", "Intermediate", "Advanced"], key="coding_lab_level")
+    question = _next_question(completed, level)
     st.markdown("### " + question["title"])
     st.write(question["prompt"])
-    with st.expander("Plan before you code"):
+    with st.expander("Deep-agent plan before coding", expanded=True):
         st.write("Concept: " + question["concept"])
-        st.write("1. Identify the input or value. 2. Choose one instruction. 3. Predict the output. 4. Write and improve.")
-    code = st.text_area("Write Python code", height=220, placeholder="# Write your first attempt here", key="code_" + question["key"])
-    col1, col2 = st.columns(2)
-    with col1:
+        st.write("1. Name the input. 2. Decide the output. 3. Write the smallest working line. 4. Trace it. 5. Improve after feedback.")
+    code = st.text_area("Write Python code", height=220, placeholder="# Your attempt goes here", key=question["key"])
+    check_col, hint_col, web_col = st.columns(3)
+    with check_col:
         if st.button("Check my logic", use_container_width=True):
             passed, feedback = _coach(question, code)
-            _save_attempt(user_id, question, category, code, passed, feedback)
+            _save_attempt(user_id, question, code, passed, feedback)
             (st.success if passed else st.info)(feedback)
-    with col2:
-        if st.button("Give me a gentle hint", use_container_width=True):
-            st.warning("Hint: " + question["concept"] + " Do not copy a full answer — write one line, then ask yourself what it will do.")
+            if passed:
+                st.rerun()
+    with hint_col:
+        if st.button("Give a gentle hint", use_container_width=True):
+            st.warning("Hint: " + question["concept"] + " Do not copy an answer; write one line and predict its output.")
+    with web_col:
+        if st.button("Find web guidance", use_container_width=True):
+            st.session_state["coding_lab_web_guidance"] = _web_guidance(question)
+    if st.session_state.get("coding_lab_web_guidance"):
+        with st.expander("DuckDuckGo learning guidance", expanded=True):
+            st.write(st.session_state["coding_lab_web_guidance"])
