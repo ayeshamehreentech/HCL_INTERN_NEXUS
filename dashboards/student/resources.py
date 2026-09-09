@@ -2,16 +2,13 @@ import re
 from urllib.parse import parse_qs, quote_plus, urlparse, urlunparse
 
 import streamlit as st
-import streamlit.components.v1 as components
 from langchain_community.tools import DuckDuckGoSearchRun
 
 from database.resources import (
     list_resources,
-    list_saved_resources,
     list_topic_history,
     mark_resource_viewed,
     save_topic_history,
-    save_user_resource,
 )
 
 YOUTUBE_PATTERN = re.compile(
@@ -115,7 +112,7 @@ def _resource_card(resource, user_id, topic):
         st.markdown(f"### {resource['title']}")
         st.caption(f"{resource['source']} · {resource['language']}")
         st.write(resource["description"][:220])
-        watch_col, save_col = st.columns(2)
+        watch_col = st.container()
         with watch_col:
             label = "▶ Watch video" if resource["type"] == "video" else "Read article"
             if st.button(label, key=f"open_resource_{resource['key']}", use_container_width=True):
@@ -126,12 +123,6 @@ def _resource_card(resource, user_id, topic):
                 )
         if resource["type"] == "article":
             st.link_button("↗ Open article", resource["url"], use_container_width=True)
-        with save_col:
-            if st.button("☆ Save", key=f"save_resource_{resource['key']}", use_container_width=True):
-                save_user_resource(
-                    user_id, resource["key"], resource["type"], resource["title"], resource["url"], topic
-                )
-                st.success("Saved")
 
 
 def render_resources():
@@ -186,14 +177,11 @@ def render_resources():
     unique_results = {item["key"]: item for item in results}.values()
     filter_choice = st.segmented_control(
         "Filter resources",
-        ["All", "Videos", "Articles", "Saved"],
+        ["All", "Videos", "Articles"],
         default="All",
         key="mentor_resource_filter",
     )
-    if filter_choice == "Saved":
-        saved_keys = {item["resource_key"] for item in list_saved_resources(user_id)}
-        results = [item for item in unique_results if item["key"] in saved_keys]
-    elif filter_choice == "Videos":
+    if filter_choice == "Videos":
         results = [item for item in unique_results if item["type"] == "video"]
     elif filter_choice == "Articles":
         results = [item for item in unique_results if item["type"] == "article"]
@@ -235,8 +223,9 @@ def render_resources():
     if current_topic and not results:
         clean_query = quote_plus(current_topic + " tutorial -shorts")
         st.subheader("YouTube learning results")
-        st.caption("YouTube learning search with Shorts excluded.")
-        components.html(
-            f'<iframe width="100%" height="430" src="https://www.youtube-nocookie.com/embed?listType=search&list={clean_query}&rel=0&modestbranding=1" title="YouTube learning search" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>',
-            height=440,
+        st.caption("Open the working YouTube search for regular learning videos. Shorts are excluded.")
+        st.link_button(
+            "▶ Search YouTube learning videos",
+            "https://www.youtube.com/results?search_query=" + clean_query,
+            use_container_width=True,
         )
