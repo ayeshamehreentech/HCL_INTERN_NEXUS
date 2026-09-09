@@ -210,6 +210,18 @@ def render_resources():
     videos = [item for item in results if item["type"] == "video"]
     articles = [item for item in results if item["type"] == "article"]
     if videos:
+        st.subheader("DuckDuckGo video suggestions")
+        video_labels = [resource["title"] for resource in videos]
+        selected_label = st.select_slider(
+            "Slide through video suggestions",
+            options=video_labels,
+            key="mentor_resource_video_slider",
+        )
+        selected_resource = videos[video_labels.index(selected_label)]
+        st.video(selected_resource["url"])
+        st.caption("Playing inside the Resources tab: " + selected_label)
+
+    if videos:
         st.subheader("Recommended videos")
         video_columns = st.columns(min(3, len(videos)))
         for index, resource in enumerate(videos):
@@ -220,21 +232,7 @@ def render_resources():
         for resource in articles:
             _resource_card(resource, user_id, current_topic or topic)
     if current_topic and not results:
-        st.warning(
-            "No indexed results were returned for this topic. You can still search "
-            "the topic directly on YouTube or the web."
+        st.info(
+            "DuckDuckGo did not return a playable video yet. Try a more specific topic "
+            "such as 'transformers attention tutorial'."
         )
-        youtube_query, _ = normalize_query(current_topic)
-        link_col, web_col = st.columns(2)
-        with link_col:
-            st.link_button(
-                "Search YouTube",
-                f"https://www.youtube.com/results?search_query={quote_plus(youtube_query)}",
-                use_container_width=True,
-            )
-        with web_col:
-            st.link_button(
-                "Search web articles",
-                f"https://duckduckgo.com/?q={quote_plus(current_topic)}",
-                use_container_width=True,
-            )
