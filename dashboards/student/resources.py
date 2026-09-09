@@ -167,7 +167,7 @@ def render_resources():
                 save_topic_history(user_id, topic.strip())
 
     current_topic = st.session_state.get("mentor_resource_topic")
-    curated = list_resources(current_topic) if current_topic else []
+    curated = list_resources() if current_topic else []
     curated_results = [
         {
             "key": item["url"],
