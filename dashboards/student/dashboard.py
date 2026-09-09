@@ -17,6 +17,7 @@ from .meetings import render_meetings
 from .resources import render_resources
 from .formula_vault import render_formula_vault
 from .helping_bot import render_helping_bot_tab
+from .coding_lab import render_coding_lab
 
 
 def render_notifications(notices):
@@ -157,7 +158,8 @@ def render_student_dashboard():
             "📅 Meetings",
             "🔗 Resources",
             "⚡ Formula Vault",
-            "🤝 Helping Bot"
+            "🤝 Helping Bot",
+            "🧪 Coding Lab"
         ]
     )
 
@@ -250,6 +252,14 @@ def render_student_dashboard():
             student_trace,
             "render helping bot tab",
             lambda _: render_helping_bot_tab(),
+        )
+
+    with tabs[7]:
+
+        run_middleware_step(
+            student_trace,
+            "render coding lab tab",
+            lambda _: render_coding_lab(),
         )
 
     with st.expander("View student dashboard middleware trace"):
