@@ -233,9 +233,9 @@ def render_resources():
         for resource in articles:
             _resource_card(resource, user_id, current_topic or topic)
     if current_topic and not results:
-        clean_query = quote_plus(current_topic + " tutorial")
+        clean_query = quote_plus(current_topic + " tutorial -shorts")
         st.subheader("YouTube learning results")
-        st.caption("Full YouTube learning search, including regular videos and Shorts.")
+        st.caption("YouTube learning search with Shorts excluded.")
         components.html(
             f'<iframe width="100%" height="430" src="https://www.youtube-nocookie.com/embed?listType=search&list={clean_query}&rel=0&modestbranding=1" title="YouTube learning search" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>',
             height=440,
