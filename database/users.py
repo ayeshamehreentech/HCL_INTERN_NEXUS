@@ -7,80 +7,33 @@ from .connection import get_connection
 # CREATE USER
 # ============================================================
 
-def create_user(
-    name,
-    email,
-    role,
-    password_hash,
-    start_date=None,
-    end_date=None
-):
-    """
-    Create a new user.
-
-    Returns:
-        user_id if successful
-        None if creation fails
-    """
-
+def create_user(name, email, role, password_hash, start_date=None, end_date=None):
+    """Create a user using only columns available in the deployed SQLite table."""
     conn = get_connection()
-    cursor = conn.cursor()
-
     try:
-        # Older databases may still contain a required ``username`` column.
-        # Include it when present so those databases remain usable.
-        columns = {
-            row["name"]
-            for row in cursor.execute("PRAGMA table_info(users)")
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+        if not columns:
+            raise RuntimeError("users table was not initialized")
+        email = email.strip().lower()
+        values_by_column = {
+            "name": name.strip(), "username": email, "email": email, "role": role,
+            "password_hash": password_hash, "password": password_hash, "is_active": 1,
+            "start_date": start_date, "end_date": end_date, "last_login": None,
+            "created_at": datetime.now().isoformat(),
         }
-
-        insert_columns = [
-            "name",
-            "email",
-            "role",
-            "password_hash",
-            "is_active",
-            "start_date",
-            "end_date",
-            "last_login",
-            "created_at",
-        ]
-        values = [
-            name.strip(),
-            email.strip().lower(),
-            role,
-            password_hash,
-            1,
-            start_date,
-            end_date,
-            None,
-            datetime.now().isoformat(),
-        ]
-
-        if "username" in columns:
-            insert_columns.insert(1, "username")
-            values.insert(1, email.strip().lower())
-
-        if "password" in columns:
-            password_index = insert_columns.index("password_hash") + 1
-            insert_columns.insert(password_index, "password")
-            values.insert(password_index, password_hash)
-
-        placeholders = ", ".join("?" for _ in values)
-        cursor.execute(
-            f"INSERT INTO users ({', '.join(insert_columns)}) "
-            f"VALUES ({placeholders})",
-            values,
+        insert_columns = [column for column in values_by_column if column in columns]
+        if not insert_columns or "email" not in insert_columns:
+            raise RuntimeError("users table does not have the required email column")
+        placeholders = ", ".join("?" for _ in insert_columns)
+        cursor = conn.execute(
+            "INSERT INTO users ({}) VALUES ({})".format(", ".join(insert_columns), placeholders),
+            [values_by_column[column] for column in insert_columns],
         )
-
         conn.commit()
-
         return cursor.lastrowid
-
-    except Exception as e:
-        print(f"Error creating user: {e}")
+    except Exception as error:
+        print("Error creating user: {}".format(error))
         return None
-
     finally:
         conn.close()
 
