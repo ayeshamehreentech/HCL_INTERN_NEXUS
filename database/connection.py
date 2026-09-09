@@ -1,10 +1,12 @@
-"""Supabase PostgreSQL persistence for HCL Intern Nexus."""
+"""Durable Supabase Data API adapter with SQLite-compatible query helpers."""
 import os
 import re
-from urllib.parse import quote_plus
+from types import SimpleNamespace
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+from supabase import create_client
+
+TABLES = {"users", "activity", "meetings", "meeting_transcriptions", "notices", "resources", "resource_history", "user_resources", "private_messages", "coding_lab_attempts", "learning_plans", "learning_checklist", "formulas", "student_reports", "deletion_requests"}
+USER_COLUMNS = ["id", "name", "username", "email", "role", "password_hash", "password", "is_active", "start_date", "end_date", "last_login", "created_at"]
 
 
 def _secret(name):
@@ -18,82 +20,122 @@ def _secret(name):
         return None
 
 
-def _database_url():
-    url = _secret("SUPABASE_DB_URL")
-    if url:
-        return url
-    host = _secret("SUPABASE_DB_HOST")
-    password = _secret("SUPABASE_DB_PASSWORD")
-    if host and password:
-        return "postgresql://postgres:{}@{}:5432/postgres".format(quote_plus(password), host)
-    raise RuntimeError("Supabase is not configured. Add SUPABASE_DB_URL to Streamlit secrets.")
+def _client():
+    url = _secret("SUPABASE_URL") or "https://bmfpzfrzrvbkcmlvopoo.supabase.co"
+    key = _secret("SUPABASE_SECRET_KEY")
+    if not key:
+        raise RuntimeError("Supabase is not configured. Add SUPABASE_SECRET_KEY to Streamlit secrets.")
+    return create_client(url, key)
 
 
-def _translate(statement):
-    sql = statement.strip()
-    if sql.upper().startswith("PRAGMA TABLE_INFO("):
-        table = sql.split("(", 1)[1].split(")", 1)[0].strip(" '\"")
-        return "SELECT column_name AS name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = %s", (table,)
-    return sql.replace("?", "%s"), None
+def _table(sql):
+    found = re.search(r"(?:FROM|INTO|UPDATE|DELETE\s+FROM)\s+([a-z_]+)", sql, re.I)
+    if not found or found.group(1) not in TABLES:
+        raise ValueError("Unsupported database query")
+    return found.group(1)
+
+
+def _value(token, values):
+    token = token.strip()
+    if token == "%s":
+        return next(values)
+    if token.upper() == "NULL":
+        return None
+    if token.startswith("'") and token.endswith("'"):
+        return token[1:-1]
+    if token in ("0", "1"):
+        return int(token)
+    return token
+
+
+def _where(rows, sql, parameters):
+    match = re.search(r"\bWHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+LIMIT|$)", sql, re.I | re.S)
+    if not match:
+        return rows
+    text = match.group(1).replace("(", "").replace(")", "")
+    values = iter(parameters or ())
+    groups = re.split(r"\s+OR\s+", text, flags=re.I)
+    tests = []
+    for group in groups:
+        rules = []
+        for piece in re.split(r"\s+AND\s+", group, flags=re.I):
+            piece = piece.strip()
+            lower = re.match(r"lower\((\w+)\)\s*=\s*lower\(%s\)", piece, re.I)
+            equal = re.match(r"(\w+)\s*=\s*%s", piece, re.I)
+            literal = re.match(r"(\w+)\s*=\s*('?\w+'?|[01])", piece, re.I)
+            null = re.match(r"(\w+)\s+IS\s+NULL", piece, re.I)
+            if lower:
+                key, value = lower.group(1), next(values); rules.append(lambda row, k=key, v=value: str(row.get(k, "")).lower() == str(v).lower())
+            elif equal:
+                key, value = equal.group(1), next(values); rules.append(lambda row, k=key, v=value: row.get(k) == v)
+            elif literal:
+                key, value = literal.group(1), literal.group(2).strip("'"); value = int(value) if value in ("0", "1") else value; rules.append(lambda row, k=key, v=value: row.get(k) == v)
+            elif null:
+                key = null.group(1); rules.append(lambda row, k=key: row.get(k) is None)
+        tests.append(rules)
+    return [row for row in rows if any(all(rule(row) for rule in group) for group in tests)]
 
 
 class Cursor:
-    def __init__(self, cursor):
-        self._cursor = cursor
-        self.lastrowid = None
+    def __init__(self, client):
+        self.client, self.rows, self.lastrowid = client, [], None
 
     def execute(self, statement, parameters=None):
-        sql, generated = _translate(statement)
-        values = generated if generated is not None else parameters
-        upper = sql.lstrip().upper()
-        needs_id = upper.startswith("INSERT INTO") and " RETURNING " not in upper
-        if needs_id:
-            sql = sql.rstrip().rstrip(";") + " RETURNING id"
-        self._cursor.execute(sql, values)
-        if needs_id:
-            row = self._cursor.fetchone()
-            self.lastrowid = row["id"] if row else None
-        return self
+        sql = " ".join(statement.strip().replace("?", "%s").split())
+        if sql.upper().startswith("PRAGMA TABLE_INFO("):
+            self.rows = [{"name": item} for item in USER_COLUMNS]
+            return self
+        table = _table(sql)
+        upper = sql.upper()
+        if upper.startswith("SELECT"):
+            response = self.client.table(table).select("*").execute()
+            rows = self._where(response.data or [], sql, parameters)
+            if "LEFT JOIN USERS" in upper:
+                users = {item["id"]: item for item in self.client.table("users").select("*").execute().data}
+                rows = [{**row, **({"name": users.get(row.get("user_id"), {}).get("name"), "email": users.get(row.get("user_id"), {}).get("email")})} for row in rows]
+            if "COUNT(*) AS COUNT" in upper:
+                self.rows = [{"count": len(rows)}]
+            else:
+                order = re.search(r"ORDER BY\s+(\w+)(?:\s+(DESC|ASC))?", sql, re.I)
+                if order: rows.sort(key=lambda row: str(row.get(order.group(1), "")), reverse=(order.group(2) or "").upper() == "DESC")
+                limit = re.search(r"LIMIT\s+(\d+)", sql, re.I)
+                self.rows = rows[:int(limit.group(1))] if limit else rows
+            return self
+        if upper.startswith("INSERT"):
+            match = re.search(r"INSERT INTO\s+\w+\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)", sql, re.I)
+            columns = [item.strip() for item in match.group(1).split(",")]
+            values = iter(parameters or ())
+            record = {key: _value(token, values) for key, token in zip(columns, match.group(2).split(","))}
+            conflict = re.search(r"ON CONFLICT\s*\(([^)]+)\)", sql, re.I)
+            response = self.client.table(table).upsert(record, on_conflict=conflict.group(1) if conflict else None).execute() if conflict else self.client.table(table).insert(record).execute()
+            data = response.data or []; self.lastrowid = data[0].get("id") if data else None
+            return self
+        if upper.startswith("UPDATE"):
+            set_match = re.search(r"SET\s+(.+?)\s+WHERE", sql, re.I)
+            values = iter(parameters or ())
+            updates = {}
+            for item in set_match.group(1).split(","):
+                key, token = item.split("=", 1); updates[key.strip()] = _value(token, values)
+            where_value = next(values)
+            key = re.search(r"WHERE\s+(\w+)\s*=", sql, re.I).group(1)
+            self.client.table(table).update(updates).eq(key, where_value).execute(); return self
+        if upper.startswith("DELETE"):
+            value = (parameters or [None])[0]; key = re.search(r"WHERE\s+(\w+)\s*=", sql, re.I).group(1)
+            self.client.table(table).delete().eq(key, value).execute(); return self
+        raise ValueError("Unsupported database query")
 
-    def fetchone(self):
-        return self._cursor.fetchone()
-
-    def fetchall(self):
-        return self._cursor.fetchall()
-
-    def __getattr__(self, name):
-        return getattr(self._cursor, name)
+    def fetchone(self): return self.rows[0] if self.rows else None
+    def fetchall(self): return self.rows
 
 
 class Connection:
-    def __init__(self):
-        self._conn = psycopg2.connect(_database_url(), cursor_factory=RealDictCursor, sslmode="require")
-
-    def cursor(self):
-        return Cursor(self._conn.cursor())
-
-    def execute(self, statement, parameters=None):
-        return self.cursor().execute(statement, parameters)
-
-    def commit(self):
-        self._conn.commit()
-
-    def rollback(self):
-        self._conn.rollback()
-
-    def close(self):
-        self._conn.close()
+    def __init__(self): self.client = _client()
+    def cursor(self): return Cursor(self.client)
+    def execute(self, statement, parameters=None): return self.cursor().execute(statement, parameters)
+    def commit(self): pass
+    def rollback(self): pass
+    def close(self): pass
 
 
-def get_connection():
-    """Return a durable Supabase PostgreSQL connection."""
-    return Connection()
-
-
-def init_db():
-    """Verify that the Supabase schema is reachable."""
-    conn = get_connection()
-    try:
-        conn.execute("SELECT 1").fetchone()
-    finally:
-        conn.close()
+def get_connection(): return Connection()
+def init_db(): get_connection().execute("SELECT * FROM users LIMIT 1")
