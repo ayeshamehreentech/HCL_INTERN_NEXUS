@@ -179,3 +179,27 @@ The application initializes its SQLite schema automatically, so a fresh environm
 ## License
 
 Add the project's chosen license before distributing the application publicly.
+
+## YouTube learning resources
+
+The Student **Resources** tab is a focused in-app learning flow:
+
+1. Search a topic. DuckDuckGo is used first to discover regular YouTube tutorials; Shorts are excluded.
+2. Results are shown in a horizontal carousel. Selecting **Play in app** keeps the YouTube player inside HCL Intern Nexus.
+3. Students can save a lesson, record a resume position, mark it complete, and continue with suggested lessons.
+4. Mentor-published YouTube resources appear under **Mentor Suggested**.
+5. A playlist URL or ID can be loaded directly into the same learning carousel.
+
+### Streamlit secrets
+
+Add this in Streamlit Cloud **Settings → Secrets** to enable playlist metadata (video titles, channels, and thumbnails):
+
+```toml
+YOUTUBE_API_KEY = "your-youtube-data-api-key"
+```
+
+Never commit API keys to the repository. The `google-api-python-client` dependency is included in `requirements.txt`.
+
+## SQLite compatibility
+
+The app accepts both the current user schema and an older SQLite schema that uses a `password` field instead of `password_hash`. Existing user records remain readable after deployment.
