@@ -16,6 +16,12 @@ def _assigned_mentor(student_id):
         "AND mentor_id IS NOT NULL ORDER BY created_at DESC LIMIT 1",
         (student_id,),
     ).fetchone()
+    if not row:
+        row = conn.execute(
+            "SELECT id FROM users WHERE lower(role) = 'mentor' ORDER BY id LIMIT 1"
+        ).fetchone()
+        if row:
+            row = {"mentor_id": row["id"]}
     conn.close()
     return row["mentor_id"] if row else None
 
@@ -26,7 +32,7 @@ def render_student_messages():
     st.subheader("📝 Doubt Clarification with your mentor")
     st.caption("Only you and your assigned mentor can see these clarifications.")
     if not mentor_id:
-        st.info("Doubt clarification will appear after a meeting is assigned.")
+        st.warning("No mentor account is available yet. Your text box will appear as soon as a mentor is created.")
         return
     messages = list_private_messages(user_id, mentor_id)
     mark_messages_read(user_id, mentor_id)
