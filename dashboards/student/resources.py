@@ -145,8 +145,11 @@ def render_playlist_loader():
 
 
 def render_resources():
-    st.subheader("🧭 AI Learning Resources")
-    st.caption("Focused learning videos discovered through DuckDuckGo. No Shorts or external navigation.")
+    st.markdown("""<style>.resource-hero{background:linear-gradient(120deg,#123d78,#2e6bb2);color:white;padding:1.25rem 1.5rem;border-radius:16px;margin-bottom:1rem}.resource-hero h2{color:white;margin:0}.resource-steps{padding:.6rem;border:1px solid #cfe1fb;border-radius:10px;background:#f7fbff;color:#16467f;text-align:center;font-size:.85rem}</style><div class="resource-hero"><h2>🎯 AI Learning Resources</h2><p>Search → Discover → Filter → Learn → Track progress — without leaving the portal.</p></div>""", unsafe_allow_html=True)
+    st.caption("Regular learning videos only. Shorts and external navigation are excluded.")
+    steps=st.columns(4)
+    for column, label in zip(steps, ("1. Search", "2. Deep Resource Agent", "3. Filter tutorials", "4. Play in this tab")):
+        with column: st.markdown("<div class="resource-steps">{}</div>".format(label), unsafe_allow_html=True)
     render_playlist_loader()
     user_id = st.session_state.get("user_id")
     topic = st.text_input("Search a topic", placeholder="Transformers in Hindi", key="mentor_resources_query")
@@ -179,22 +182,22 @@ def render_resources():
     if not videos:
         st.warning("No safe, playable video links were found. Try a more specific topic.")
         return
-    st.markdown("### YouTube learning videos")
+    st.markdown("### ▶ YouTube learning carousel")
     start = st.session_state.get("carousel_start", 0)
     left, content, right = st.columns([1, 12, 1])
     with left:
         if st.button("◀", key="carousel_left"):
-            st.session_state["carousel_start"] = max(0, start - 3)
+            st.session_state["carousel_start"] = max(0, start - 4)
             st.rerun()
     with content:
-        visible = videos[start:start + 3]
+        visible = videos[start:start + 4]
         cols = st.columns(len(visible))
         for col, video in zip(cols, visible):
             with col:
                 _video_card(video, start)
     with right:
         if st.button("▶", key="carousel_right"):
-            st.session_state["carousel_start"] = min(max(0, len(videos) - 3), start + 3)
+            st.session_state["carousel_start"] = min(max(0, len(videos) - 4), start + 4)
             st.rerun()
     selected = st.session_state.get("selected_resource_video")
     if not selected:
@@ -217,7 +220,7 @@ def render_resources():
             if user_id:
                 _save_progress(user_id, selected["key"], progress.get("position_seconds", 0), True)
             st.success("Marked completed")
-    st.markdown("### Suggested videos")
+    st.markdown("### ✨ Suggested next lessons")
     suggested = videos[1:4] or videos
     cols = st.columns(len(suggested))
     for col, video in zip(cols, suggested):
