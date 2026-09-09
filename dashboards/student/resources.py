@@ -149,7 +149,7 @@ def render_resources():
     st.caption("Regular learning videos only. Shorts and external navigation are excluded.")
     steps=st.columns(4)
     for column, label in zip(steps, ("1. Search", "2. Deep Resource Agent", "3. Filter tutorials", "4. Play in this tab")):
-        with column: st.markdown("<div class="resource-steps">{}</div>".format(label), unsafe_allow_html=True)
+        with column: st.markdown("<div class='resource-steps'>{}</div>".format(label), unsafe_allow_html=True)
     render_playlist_loader()
     user_id = st.session_state.get("user_id")
     topic = st.text_input("Search a topic", placeholder="Transformers in Hindi", key="mentor_resources_query")
