@@ -25,12 +25,15 @@ SEEDS = [
     ("Advanced", "Nested pattern", "Print a 4 by 4 square of stars.", ["for", "range", "print"], "One loop creates rows; another builds a row."),
 ]
 
+
 def _attempt_count(user_id):
     conn = get_connection()
     try:
-        return conn.execute("SELECT COUNT(DISTINCT question_key) AS total FROM coding_lab_attempts WHERE user_id = ? AND passed = 1", (user_id,)).fetchone()["total"]
+        row = conn.execute("SELECT COUNT(DISTINCT question_key) AS total FROM coding_lab_attempts WHERE user_id = ? AND passed = 1", (user_id,)).fetchone()
+        return row["total"] if row else 0
     finally:
         conn.close()
+
 
 def _save_attempt(user_id, question, code, passed, feedback):
     conn = get_connection()
@@ -40,11 +43,12 @@ def _save_attempt(user_id, question, code, passed, feedback):
     finally:
         conn.close()
 
+
 def _next_question(completed, level):
     pool = [seed for seed in SEEDS if seed[0] == level]
-    round_number = completed // len(pool) + 1
     category, title, prompt, checks, concept = pool[completed % len(pool)]
-    return {"key": "python-{}-{}".format(level.lower(), completed + 1), "category": category, "title": "{} · Practice {}".format(title, round_number), "prompt": prompt, "checks": checks, "concept": concept}
+    return {"key": "python-{}-{}".format(level.lower(), completed + 1), "category": category, "title": "{} · Practice {}".format(title, completed // len(pool) + 1), "prompt": prompt, "checks": checks, "concept": concept}
+
 
 def _coach(question, code):
     if not code.strip():
@@ -54,15 +58,25 @@ def _coach(question, code):
         return False, "Next small fix: add {}. {} Then trace the code one line at a time.".format(missing[0], question["concept"])
     return True, "Core logic found. {} Explain each line, then unlock the next challenge.".format(question["concept"])
 
+
 def _web_guidance(question):
     try:
         return DuckDuckGoSearchRun().run("Python tutorial {} {}".format(question["title"], question["concept"]))
     except Exception:
         return "Web guidance is temporarily unavailable. Use the plan and write one line at a time."
 
+
+def _deep_agent_guidance(question, code):
+    try:
+        from ai.deep_agents import coach_python
+        return coach_python(question["prompt"], question["concept"], code)
+    except Exception as error:
+        return "Deep Agent is temporarily unavailable: {}. Start with: {}".format(error, question["concept"])
+
+
 def render_coding_lab():
     st.subheader("🧪 Continuous Python Coding Lab")
-    st.caption("Plan → write → check → hint → improve → next question. The practice path continues beyond 50 questions.")
+    st.caption("Deep Agent loop: plan → write → inspect → research → improve → next question. Practice continues beyond 50 questions.")
     user_id = st.session_state.get("user_id")
     if not user_id:
         st.error("Please sign in again to save your practice.")
@@ -73,11 +87,11 @@ def render_coding_lab():
     question = _next_question(completed, level)
     st.markdown("### " + question["title"])
     st.write(question["prompt"])
-    with st.expander("Deep-agent plan before coding", expanded=True):
+    with st.expander("Deep Agent plan before coding", expanded=True):
         st.write("Concept: " + question["concept"])
         st.write("1. Name the input. 2. Decide the output. 3. Write the smallest working line. 4. Trace it. 5. Improve after feedback.")
     code = st.text_area("Write Python code", height=220, placeholder="# Your attempt goes here", key=question["key"])
-    check_col, hint_col, web_col = st.columns(3)
+    check_col, hint_col, agent_col, web_col = st.columns(4)
     with check_col:
         if st.button("Check my logic", use_container_width=True):
             passed, feedback = _coach(question, code)
@@ -88,9 +102,15 @@ def render_coding_lab():
     with hint_col:
         if st.button("Give a gentle hint", use_container_width=True):
             st.warning("Hint: " + question["concept"] + " Do not copy an answer; write one line and predict its output.")
+    with agent_col:
+        if st.button("Ask Deep Agent", use_container_width=True):
+            st.session_state["coding_lab_agent_guidance"] = _deep_agent_guidance(question, code)
     with web_col:
         if st.button("Find web guidance", use_container_width=True):
             st.session_state["coding_lab_web_guidance"] = _web_guidance(question)
+    if st.session_state.get("coding_lab_agent_guidance"):
+        with st.expander("🤖 Deep Agent coaching", expanded=True):
+            st.write(st.session_state["coding_lab_agent_guidance"])
     if st.session_state.get("coding_lab_web_guidance"):
         with st.expander("DuckDuckGo learning guidance", expanded=True):
             st.write(st.session_state["coding_lab_web_guidance"])
