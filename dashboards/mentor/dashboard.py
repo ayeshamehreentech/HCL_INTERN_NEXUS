@@ -308,7 +308,7 @@ def render_students_preview():
                 ).fetchall()
                 conn.close()
                 metric_col, plan_col = st.columns(2)
-                metric_col.metric("Learning sessions", activity.get("sessions", 0))
+                metric_col.metric("Learning sessions", activity.get("sessions", 0) if activity else 0)
                 plan_col.metric("Plans created", plans.get("count", 0) if plans else 0)
                 st.progress(min(1.0, (activity.get("seconds", 0) if activity else 0) / 36000), text="Activity progress")
                 if activity_by_day:
