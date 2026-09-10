@@ -11,3 +11,4 @@ agent_memory.db
 .mypy_cache/
 .ruff_cache/
 *.log
+.continue/
