@@ -1,197 +1,55 @@
+"""Learning-plan and checklist persistence through Supabase Data API."""
 import json
 from datetime import datetime
-
 from .connection import get_connection
 
 
-def save_learning_plan(
-    user_id,
-    topic,
-    level,
-    hours_per_day,
-    days,
-    plan
-):
-    """Save an AI-generated learning plan."""
+def _client():
+    return get_connection().client
 
-    conn = get_connection()
-    cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        INSERT INTO learning_plans
-        (
-            user_id,
-            topic,
-            level,
-            hours_per_day,
-            days,
-            plan_json,
-            created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            user_id,
-            topic,
-            level,
-            hours_per_day,
-            days,
-            json.dumps(plan),
-            datetime.now().isoformat()
-        )
-    )
-
-    conn.commit()
-    conn.close()
+def save_learning_plan(user_id, topic, level, hours_per_day, days, plan):
+    record = {
+        "user_id": user_id, "topic": topic, "level": level,
+        "hours_per_day": int(hours_per_day), "days": int(days),
+        "plan_json": json.dumps(plan), "created_at": datetime.now().isoformat(),
+    }
+    _client().table("learning_plans").insert(record).execute()
 
 
 def get_latest_plan(user_id):
-    """Get the latest learning plan for a user."""
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        SELECT *
-        FROM learning_plans
-        WHERE user_id = ?
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        (user_id,)
-    )
-
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row:
+    rows = _client().table("learning_plans").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(1).execute().data or []
+    if not rows:
         return None
-
-    result = dict(row)
-
+    result = dict(rows[0])
     try:
-        result["plan"] = json.loads(result["plan_json"])
-    except Exception:
-        result["plan"] = result["plan_json"]
-
+        result["plan"] = json.loads(result.get("plan_json") or "{}")
+    except (TypeError, ValueError):
+        result["plan"] = {}
     return result
 
 
 def save_checklist(user_id, topic, items):
-    """Save checklist items."""
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    # Remove previous checklist for this topic
-    cursor.execute(
-        """
-        DELETE FROM learning_checklist
-        WHERE user_id = ? AND topic = ?
-        """,
-        (user_id, topic)
-    )
-
-    for item in items:
-        cursor.execute(
-            """
-            INSERT INTO learning_checklist
-            (
-                user_id,
-                topic,
-                item,
-                completed,
-                created_at
-            )
-            VALUES (?, ?, ?, 0, ?)
-            """,
-            (
-                user_id,
-                topic,
-                item,
-                datetime.now().isoformat()
-            )
-        )
-
-    conn.commit()
-    conn.close()
+    client = _client()
+    client.table("learning_checklist").delete().eq("user_id", user_id).eq("topic", topic).execute()
+    records = [{"user_id": user_id, "topic": topic, "item": item, "completed": 0, "created_at": datetime.now().isoformat()} for item in items]
+    if records:
+        client.table("learning_checklist").insert(records).execute()
 
 
 def get_checklist(user_id, topic=None):
-    """Get checklist items."""
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    if topic:
-        cursor.execute(
-            """
-            SELECT *
-            FROM learning_checklist
-            WHERE user_id = ? AND topic = ?
-            ORDER BY id
-            """,
-            (user_id, topic)
-        )
-    else:
-        cursor.execute(
-            """
-            SELECT *
-            FROM learning_checklist
-            WHERE user_id = ?
-            ORDER BY id
-            """,
-            (user_id,)
-        )
-
-    items = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-
-    return items
+    request = _client().table("learning_checklist").select("*").eq("user_id", user_id).order("id")
+    if topic is not None:
+        request = request.eq("topic", topic)
+    return request.execute().data or []
 
 
 def set_checklist_item(item_id, completed):
-    """Mark a checklist item complete/incomplete."""
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        UPDATE learning_checklist
-        SET completed = ?
-        WHERE id = ?
-        """,
-        (1 if completed else 0, item_id)
-    )
-
-    conn.commit()
-    conn.close()
+    _client().table("learning_checklist").update({"completed": int(bool(completed))}).eq("id", item_id).execute()
 
 
 def get_learning_progress(user_id):
-    """Calculate overall checklist progress."""
-
     items = get_checklist(user_id)
-
-    if not items:
-        return {
-            "total": 0,
-            "completed": 0,
-            "percentage": 0
-        }
-
-    completed = sum(
-        1 for item in items
-        if item["completed"]
-    )
-
     total = len(items)
-
-    return {
-        "total": total,
-        "completed": completed,
-        "percentage": round((completed / total) * 100, 2)
-    }
+    completed = sum(1 for item in items if item.get("completed"))
+    return {"total": total, "completed": completed, "percentage": round((completed / total) * 100, 2) if total else 0}
