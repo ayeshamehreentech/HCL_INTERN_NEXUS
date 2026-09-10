@@ -25,11 +25,41 @@ SEEDS = [
     ("Advanced", "Nested pattern", "Print a 4 by 4 square of stars.", ["for", "range", "print"], "One loop creates rows; another builds a row."),
 ]
 
+SOLUTIONS = {
+    "Print your name": 'print("Ayesha")',
+    "Add two numbers": "first = 5\nsecond = 7\nprint(first + second)",
+    "Greeting": 'name = "Ayesha"\nprint("Hello, " + name)',
+    "Favourite colour": 'colour = input("Favourite colour: ")\nprint(colour)',
+    "Rectangle area": "length = 5\nwidth = 3\nprint(length * width)",
+    "First list": 'fruits = ["apple", "banana", "mango"]\nprint(fruits)',
+    "Even or odd": 'number = int(input("Number: "))\nif number % 2 == 0:\n    print("Even")\nelse:\n    print("Odd")',
+    "Count to five": "for number in range(1, 6):\n    print(number)",
+    "Largest of two": 'first = int(input("First number: "))\nsecond = int(input("Second number: "))\nif first > second:\n    print(first)\nelse:\n    print(second)',
+    "Sum a list": "numbers = [2, 4, 6]\nprint(sum(numbers))",
+    "Multiplication table": "for number in range(1, 11):\n    print(3 * number)",
+    "Password check": 'password = input("Password: ")\nif password == "python":\n    print("Success")\nelse:\n    print("Retry")',
+    "Right triangle": "for row in range(1, 6):\n    print("*" * row)",
+    "Number pyramid": "for number in range(1, 6):\n    print(str(number) * number)",
+    "FizzBuzz": "for number in range(1, 21):\n    if number % 15 == 0:\n        print("FizzBuzz")\n    elif number % 3 == 0:\n        print("Fizz")\n    elif number % 5 == 0:\n        print("Buzz")\n    else:\n        print(number)",
+    "Palindrome": 'word = input("Word: ")\nif word == word[::-1]:\n    print("Palindrome")\nelse:\n    print("Not a palindrome")',
+    "Prime check": 'number = int(input("Number: "))\nis_prime = number > 1\nfor divisor in range(2, number):\n    if number % divisor == 0:\n        is_prime = False\n        break\nprint("Prime" if is_prime else "Not prime")',
+    "Nested pattern": "for row in range(4):\n    for column in range(4):\n        print("*", end="")\n    print()",
+}
+
 
 def _attempt_count(user_id):
     conn = get_connection()
     try:
         row = conn.execute("SELECT COUNT(DISTINCT question_key) AS total FROM coding_lab_attempts WHERE user_id = ? AND passed = 1", (user_id,)).fetchone()
+        return row["total"] if row else 0
+    finally:
+        conn.close()
+
+
+def _solution_reveal_count(user_id):
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT COUNT(*) AS total FROM coding_lab_attempts WHERE user_id = ? AND feedback = ?", (user_id, "solution_unlock")).fetchone()
         return row["total"] if row else 0
     finally:
         conn.close()
@@ -47,7 +77,7 @@ def _save_attempt(user_id, question, code, passed, feedback):
 def _next_question(completed, level):
     pool = [seed for seed in SEEDS if seed[0] == level]
     category, title, prompt, checks, concept = pool[completed % len(pool)]
-    return {"key": "python-{}-{}".format(level.lower(), completed + 1), "category": category, "title": "{} · Practice {}".format(title, completed // len(pool) + 1), "prompt": prompt, "checks": checks, "concept": concept}
+    return {"key": "python-{}-{}".format(level.lower(), completed + 1), "category": category, "title": "{} · Practice {}".format(title, completed // len(pool) + 1), "prompt": prompt, "checks": checks, "concept": concept, "base_title": title}
 
 
 def _coach(question, code):
@@ -66,23 +96,26 @@ def _web_guidance(question):
         return "Web guidance is temporarily unavailable. Use the plan and write one line at a time."
 
 
-def _deep_agent_guidance(question, code):
-    try:
-        from ai.deep_agents import coach_python
-        return coach_python(question["prompt"], question["concept"], code)
-    except Exception as error:
-        return "Deep Agent is temporarily unavailable: {}. Start with: {}".format(error, question["concept"])
+def _deep_agent_hint(question, code):
+    passed, feedback = _coach(question, code)
+    status = "Your attempt is close." if passed else "Your attempt needs one more step."
+    return "{} {} The full reference answer remains locked until you earn a solution credit.".format(status, feedback)
 
 
 def render_coding_lab():
     st.subheader("🧪 Continuous Python Coding Lab")
-    st.caption("Deep Agent loop: plan → write → inspect → research → improve → next question. Practice continues beyond 50 questions.")
+    st.caption("Deep Agent loop: plan → write → inspect → research → improve → next question. Every 3 correct challenges earns one full-answer credit.")
     user_id = st.session_state.get("user_id")
     if not user_id:
         st.error("Please sign in again to save your practice.")
         return
+
     completed = _attempt_count(user_id)
+    reveals_used = _solution_reveal_count(user_id)
+    available_reveals = max(0, completed // 3 - reveals_used)
     st.progress(min(completed / 50, 1.0), text="{}/50 foundation questions completed · practice continues".format(completed))
+    st.info("🏆 Solution credits: {} available. Earn 1 after every 3 distinct correct challenges; each credit reveals one full answer.".format(available_reveals))
+
     level = st.selectbox("Starting level", ["Beginner", "Intermediate", "Advanced"], key="coding_lab_level")
     question = _next_question(completed, level)
     st.markdown("### " + question["title"])
@@ -90,6 +123,7 @@ def render_coding_lab():
     with st.expander("Deep Agent plan before coding", expanded=True):
         st.write("Concept: " + question["concept"])
         st.write("1. Name the input. 2. Decide the output. 3. Write the smallest working line. 4. Trace it. 5. Improve after feedback.")
+
     code = st.text_area("Write Python code", height=220, placeholder="# Your attempt goes here", key=question["key"])
     check_col, hint_col, agent_col, web_col = st.columns(4)
     with check_col:
@@ -103,14 +137,24 @@ def render_coding_lab():
         if st.button("Give a gentle hint", use_container_width=True):
             st.warning("Hint: " + question["concept"] + " Do not copy an answer; write one line and predict its output.")
     with agent_col:
-        if st.button("Ask Deep Agent", use_container_width=True):
-            st.session_state["coding_lab_agent_guidance"] = _deep_agent_guidance(question, code)
+        if st.button("Get answer (1 coin)", use_container_width=True):
+            if available_reveals > 0:
+                _save_attempt(user_id, question, "", False, "solution_unlock")
+                st.session_state["coding_lab_full_answer"] = SOLUTIONS[question["base_title"]]
+                st.session_state["coding_lab_answer_question"] = question["key"]
+                st.rerun()
+            st.session_state["coding_lab_agent_guidance"] = _deep_agent_hint(question, code)
     with web_col:
         if st.button("Find web guidance", use_container_width=True):
             st.session_state["coding_lab_web_guidance"] = _web_guidance(question)
+
     if st.session_state.get("coding_lab_agent_guidance"):
-        with st.expander("🤖 Deep Agent coaching", expanded=True):
+        with st.expander("💡 Study guidance", expanded=True):
             st.write(st.session_state["coding_lab_agent_guidance"])
+    if st.session_state.get("coding_lab_full_answer") and st.session_state.get("coding_lab_answer_question") == question["key"]:
+        with st.expander("✅ Earned reference answer", expanded=True):
+            st.code(st.session_state["coding_lab_full_answer"], language="python")
+            st.caption("Read it line by line, then write your own version before moving on.")
     if st.session_state.get("coding_lab_web_guidance"):
         with st.expander("DuckDuckGo learning guidance", expanded=True):
             st.write(st.session_state["coding_lab_web_guidance"])
