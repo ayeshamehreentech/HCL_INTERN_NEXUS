@@ -1,122 +1,51 @@
 import streamlit as st
 import streamlit.components.v1 as components
 from ai.config import get_setting
-from database.meetings import list_meetings, save_meeting, update_meeting
+from database.meetings import list_meetings, save_meeting, save_recurring_meetings, update_meeting
 from database.users import list_users
 
 
 def render_mentor_meetings():
-    """Render mentor scheduling, editing, joining, and in-page meeting video."""
     st.subheader("📅 Meetings")
-
     students = [user for user in list_users() if user.get("role") == "student"]
     with st.expander("＋ Schedule or change a meeting", expanded=False):
-        student_options = {
-            f"{student['name']} · {student.get('email', 'no email')}": student
-            for student in students
-        }
-        selected_label = st.selectbox(
-            "Student",
-            list(student_options),
-            key="meeting_student",
-        ) if student_options else None
-        selected_student = student_options.get(selected_label) if selected_label else None
-        if selected_student:
-            st.caption(f"Student email: {selected_student.get('email', 'Not available')}")
-
-        meeting_title = st.text_input("Meeting title", key="meeting_title")
-        meeting_date = st.date_input("Meeting date", key="meeting_date")
-        hour_col, minute_col, meridiem_col = st.columns([2, 2, 2])
-        with hour_col:
-            meeting_hour = st.selectbox("Hour", list(range(1, 13)), index=8, key="meeting_hour")
-        with minute_col:
-            meeting_minute = st.selectbox("Minute", [0, 15, 30, 45], key="meeting_minute")
-        with meridiem_col:
-            meeting_meridiem = st.selectbox("AM / PM", ["AM", "PM"], index=1, key="meeting_meridiem")
-        meeting_time = f"{meeting_hour:02d}:{meeting_minute:02d} {meeting_meridiem}"
-        st.caption(f"Scheduled time: {meeting_time}")
-        meeting_link = st.text_input(
-            "Meeting link",
-            value=get_setting("TEAMS_MEETING_LINK"),
-            key="meeting_link",
-        )
-
+        options = {"{} · {}".format(student.get("name", "Student"), student.get("email", "")): student for student in students}
+        label = st.selectbox("Student", list(options), key="meeting_student") if options else None
+        student = options.get(label) if label else None
+        title = st.text_input("Meeting title", key="meeting_title")
+        meeting_date = st.date_input("First meeting date", key="meeting_date")
+        hour, minute, meridiem = st.columns(3)
+        with hour: value_hour = st.selectbox("Hour", list(range(1,13)), index=8, key="meeting_hour")
+        with minute: value_minute = st.selectbox("Minute", [0,15,30,45], key="meeting_minute")
+        with meridiem: value_meridiem = st.selectbox("AM / PM", ["AM","PM"], index=1, key="meeting_meridiem")
+        time = "{:02d}:{:02d} {}".format(value_hour, value_minute, value_meridiem)
+        link = st.text_input("Meeting link", value=get_setting("TEAMS_MEETING_LINK"), key="meeting_link")
+        repeat = st.checkbox("Repeat every Tuesday and Thursday (next 12 meetings)", value=True, key="meeting_repeat_tue_thu")
         if st.button("Schedule meeting", use_container_width=True):
-            if selected_student and meeting_title.strip() and meeting_link.strip():
-                save_meeting(
-                    selected_student["id"],
-                    st.session_state.get("user_id"),
-                    meeting_title,
-                    str(meeting_date),
-                    meeting_time,
-                    meeting_link,
-                )
-                st.success("Meeting scheduled.")
-                st.rerun()
-            else:
+            if not student or not title.strip() or not link.strip():
                 st.error("Select a student and enter a title and meeting link.")
-
-    mentor_id = st.session_state.get("user_id")
-    meetings = list_meetings(mentor_id, role="mentor")
-    if not meetings:
-        st.info("No meetings scheduled.")
-    else:
-        for meeting in meetings:
-            with st.container(border=True):
-                st.markdown(f"### {meeting.get('title', 'Meeting')}")
-                st.write(f"Date: {meeting.get('meeting_date', 'N/A')}")
-                st.write(f"Time: {meeting.get('meeting_time', 'N/A')}")
-                link = meeting.get("meeting_link", "")
-
-                if link:
-                    join_col, panel_col = st.columns(2)
-                    with join_col:
-                        st.link_button(
-                            "🔗 Open Teams",
-                            link,
-                            use_container_width=True,
-                        )
-                    with panel_col:
-                        if st.button(
-                            "🖥️ Show here",
-                            key=f"mentor_show_meeting_{meeting['id']}",
-                            use_container_width=True,
-                        ):
-                            st.session_state["active_mentor_meeting_link"] = link
-                            st.rerun()
-
-                with st.expander("Edit meeting"):
-                    edited_title = st.text_input(
-                        "Title", value=meeting.get("title", ""),
-                        key=f"edit_meeting_title_{meeting['id']}",
-                    )
-                    edited_date = st.text_input(
-                        "Date", value=meeting.get("meeting_date", ""),
-                        key=f"edit_meeting_date_{meeting['id']}",
-                    )
-                    edited_time = st.text_input(
-                        "Time", value=meeting.get("meeting_time", ""),
-                        key=f"edit_meeting_time_{meeting['id']}",
-                    )
-                    edited_link = st.text_input(
-                        "Meeting link", value=link,
-                        key=f"edit_meeting_link_{meeting['id']}",
-                    )
-                    if st.button(
-                        "Save meeting changes",
-                        key=f"save_meeting_{meeting['id']}",
-                        use_container_width=True,
-                    ):
-                        update_meeting(
-                            meeting["id"],
-                            edited_title,
-                            edited_date,
-                            edited_time,
-                            edited_link,
-                        )
-                        st.success("Meeting updated.")
-                        st.rerun()
-
-    active_link = st.session_state.get("active_mentor_meeting_link")
-    if active_link:
-        components.iframe(active_link, height=520, scrolling=True)
+            elif repeat:
+                save_recurring_meetings(student["id"], st.session_state.get("user_id"), title, meeting_date, time, link)
+                st.success("12 Tuesday/Thursday meetings scheduled."); st.rerun()
+            else:
+                save_meeting(student["id"], st.session_state.get("user_id"), title, meeting_date, time, link)
+                st.success("Meeting scheduled."); st.rerun()
+    meetings = list_meetings(st.session_state.get("user_id"), role="mentor")
+    if not meetings: st.info("No meetings scheduled.")
+    for meeting in meetings:
+        with st.container(border=True):
+            st.markdown("### " + meeting.get("title", "Meeting"))
+            st.write("Date: {} · Time: {}".format(meeting.get("meeting_date", "N/A"), meeting.get("meeting_time", "N/A")))
+            link = meeting.get("meeting_link", "")
+            if link:
+                if st.button("🖥️ Show meeting here", key="mentor_show_{}".format(meeting["id"])):
+                    st.session_state["active_mentor_meeting_link"] = link; st.rerun()
+            with st.expander("Edit meeting"):
+                changed_title = st.text_input("Title", meeting.get("title", ""), key="edit_title_{}".format(meeting["id"]))
+                changed_date = st.text_input("Date", meeting.get("meeting_date", ""), key="edit_date_{}".format(meeting["id"]))
+                changed_time = st.text_input("Time", meeting.get("meeting_time", ""), key="edit_time_{}".format(meeting["id"]))
+                changed_link = st.text_input("Meeting link", link, key="edit_link_{}".format(meeting["id"]))
+                if st.button("Save meeting changes", key="save_meeting_{}".format(meeting["id"])):
+                    update_meeting(meeting["id"], changed_title, changed_date, changed_time, changed_link); st.rerun()
+    if st.session_state.get("active_mentor_meeting_link"):
+        components.iframe(st.session_state["active_mentor_meeting_link"], height=520, scrolling=True)
