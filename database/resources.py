@@ -87,6 +87,33 @@ def save_user_resource(user_id, resource_key, resource_type, title, url, topic):
     conn.close()
 
 
+def get_user_resource(user_id, resource_key):
+    """Return a student's persisted state for one learning resource."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM user_resources WHERE user_id = ? AND resource_key = ?",
+        (user_id, resource_key),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_video_progress(user_id, resource_key, title, url, topic, seconds, completed=False):
+    """Persist video progress in Supabase; no runtime table creation is used."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO user_resources "
+        "(user_id, resource_key, resource_type, title, url, topic, viewed, last_viewed_at, progress_seconds, completed) "
+        "VALUES (?, ?, 'video', ?, ?, ?, 1, ?, ?, ?) "
+        "ON CONFLICT(user_id, resource_key) DO UPDATE SET "
+        "viewed = 1, last_viewed_at = excluded.last_viewed_at, "
+        "progress_seconds = excluded.progress_seconds, completed = excluded.completed",
+        (user_id, resource_key, title, url, topic, datetime.now().isoformat(), int(seconds), int(completed)),
+    )
+    conn.commit()
+    conn.close()
+
+
 def mark_resource_viewed(user_id, resource_key, resource_type, title, url, topic):
     conn = get_connection()
     conn.execute(

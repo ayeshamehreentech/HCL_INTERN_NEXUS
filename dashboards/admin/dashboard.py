@@ -1,7 +1,7 @@
 import streamlit as st
 
 from database.users import list_users
-from database.admin import list_notices
+from database.admin import list_notices, list_deletion_requests, update_deletion_request
 
 
 # =============================================================
@@ -200,6 +200,9 @@ def render_admin_dashboard():
                 "admin_page"
             ] = "system"
 
+    if st.button("🗑️ Account Deletion Requests", use_container_width=True):
+        st.session_state["admin_page"] = "deletions"
+
     # ---------------------------------------------------------
     # Selected page
     # ---------------------------------------------------------
@@ -234,6 +237,10 @@ def render_admin_dashboard():
     elif selected_page == "system":
 
         render_system()
+
+    elif selected_page == "deletions":
+
+        render_deletion_requests()
 
     else:
 
@@ -552,7 +559,7 @@ def render_system():
     )
 
     st.write(
-        "Database: SQLite"
+        "Database: Supabase PostgreSQL"
     )
 
     st.write(
@@ -586,3 +593,34 @@ def render_system():
 def render_dashboard():
 
     render_admin_dashboard()
+
+
+def render_deletion_requests():
+    """Let an administrator review requests without deleting data automatically."""
+    st.subheader("🗑️ Account Deletion Requests")
+    st.caption("Approve or reject requests. Approval records the decision; deleting a user remains a separate deliberate action.")
+    try:
+        requests = list_deletion_requests()
+    except Exception as error:
+        st.error(f"Unable to load deletion requests: {error}")
+        return
+
+    if not requests:
+        st.info("No account deletion requests.")
+        return
+
+    for request in requests:
+        with st.container(border=True):
+            st.markdown(f"**{request.get('name') or 'User'}** · {request.get('email') or 'No email'}")
+            st.write(f"Reason: {request.get('reason') or 'No reason supplied'}")
+            st.caption(f"Requested: {request.get('created_at', '')} · Status: {request.get('status', 'pending')}")
+            if request.get("status") == "pending":
+                approve, reject = st.columns(2)
+                with approve:
+                    if st.button("Approve request", key=f"approve_delete_{request['id']}", use_container_width=True):
+                        update_deletion_request(request["id"], "approved")
+                        st.rerun()
+                with reject:
+                    if st.button("Reject request", key=f"reject_delete_{request['id']}", use_container_width=True):
+                        update_deletion_request(request["id"], "rejected")
+                        st.rerun()

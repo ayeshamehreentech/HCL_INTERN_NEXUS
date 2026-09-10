@@ -64,12 +64,17 @@ def render_student_messages():
 def render_mentor_messages():
     user_id = st.session_state.get("user_id")
     conn = get_connection()
-    students = conn.execute(
-        "SELECT DISTINCT u.id, u.name, u.email FROM users u "
-        "JOIN meetings m ON m.student_id = u.id "
-        "WHERE m.mentor_id = ? ORDER BY u.name",
-        (user_id,),
+    meeting_rows = conn.execute(
+        "SELECT student_id FROM meetings WHERE mentor_id = ?", (user_id,)
     ).fetchall()
+    student_ids = {row["student_id"] for row in meeting_rows if row.get("student_id") is not None}
+    students = []
+    for student_id in student_ids:
+        student = conn.execute(
+            "SELECT id, name, email FROM users WHERE id = ?", (student_id,)
+        ).fetchone()
+        if student:
+            students.append(student)
     conn.close()
     st.subheader("📝 Student Doubt Clarifications")
     st.caption("Each clarification is visible only to you and that student.")

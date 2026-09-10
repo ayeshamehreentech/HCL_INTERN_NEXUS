@@ -7,7 +7,14 @@ from langchain_community.tools import DuckDuckGoSearchRun
 from googleapiclient.discovery import build
 
 from database.connection import get_connection
-from database.resources import list_resources, list_topic_history, save_topic_history, save_user_resource
+from database.resources import (
+    get_user_resource,
+    list_resources,
+    list_topic_history,
+    save_topic_history,
+    save_user_resource,
+    save_video_progress,
+)
 
 YOUTUBE_PATTERN = re.compile(r"https?://(?:www\.)?(?:youtube\.com/watch\?v=[\w-]+|youtu\.be/[\w-]+)")
 
@@ -23,8 +30,52 @@ def normalize_query(topic):
     return " ".join(clean.split()), language
 
 
+def _youtube_search(topic):
+    """Use the configured YouTube Data API for reliable, embeddable lessons."""
+    api_key = st.secrets.get("YOUTUBE_API_KEY", "")
+    if not api_key:
+        return []
+    query, language = normalize_query(topic)
+    youtube = build("youtube", "v3", developerKey=api_key, cache_discovery=False)
+    response = youtube.search().list(
+        part="snippet",
+        q="{} {} tutorial -shorts".format(query, language),
+        type="video",
+        videoEmbeddable="true",
+        maxResults=12,
+    ).execute()
+    videos = []
+    for item in response.get("items", []):
+        snippet = item.get("snippet", {})
+        title = snippet.get("title", "YouTube lesson")
+        if "shorts" in title.lower():
+            continue
+        video_id = item.get("id", {}).get("videoId")
+        if not video_id:
+            continue
+        image = (snippet.get("thumbnails", {}).get("medium") or snippet.get("thumbnails", {}).get("high") or {}).get("url")
+        videos.append({
+            "key": video_id,
+            "url": "https://www.youtube.com/watch?v=" + video_id,
+            "title": title,
+            "channel": snippet.get("channelTitle", "YouTube"),
+            "language": language,
+            "duration": "Play in portal",
+            "thumbnail": image or "https://i.ytimg.com/vi/{}/hqdefault.jpg".format(video_id),
+        })
+    return videos
+
+
 def _discover(topic):
     query, language = normalize_query(topic)
+    try:
+        videos = _youtube_search(topic)
+        if videos:
+            return videos
+    except Exception:
+        # A quota or connectivity problem must not make Resources unusable.
+        # Continue to the DuckDuckGo discovery fallback below.
+        pass
     try:
         evidence = DuckDuckGoSearchRun().run("site:youtube.com/watch {} {} tutorial -shorts".format(query, language))
     except Exception:
@@ -51,25 +102,18 @@ def _discover(topic):
     return videos[:12]
 
 
-def _ensure_progress():
-    conn = get_connection()
-    conn.execute("CREATE TABLE IF NOT EXISTS video_progress (user_id INTEGER, video_key TEXT, position_seconds INTEGER DEFAULT 0, completed INTEGER DEFAULT 0, updated_at TEXT, PRIMARY KEY(user_id, video_key))")
-    conn.commit()
-    return conn
-
-
 def _progress(user_id, video_key):
-    conn = _ensure_progress()
-    row = conn.execute("SELECT * FROM video_progress WHERE user_id = ? AND video_key = ?", (user_id, video_key)).fetchone()
-    conn.close()
-    return dict(row) if row else {"position_seconds": 0, "completed": 0}
+    row = get_user_resource(user_id, video_key)
+    return row or {"progress_seconds": 0, "completed": 0}
 
 
 def _save_progress(user_id, video_key, seconds, completed=False):
-    conn = _ensure_progress()
-    conn.execute("INSERT INTO video_progress (user_id, video_key, position_seconds, completed, updated_at) VALUES (?, ?, ?, ?, datetime('now')) ON CONFLICT(user_id, video_key) DO UPDATE SET position_seconds = excluded.position_seconds, completed = excluded.completed, updated_at = excluded.updated_at", (user_id, video_key, seconds, int(completed)))
-    conn.commit()
-    conn.close()
+    selected = st.session_state.get("selected_resource_video", {})
+    save_video_progress(
+        user_id, video_key, selected.get("title", "YouTube lesson"),
+        selected.get("url", ""), st.session_state.get("active_resource_topic", ""),
+        seconds, completed,
+    )
 
 
 def _video_card(video, index):
@@ -207,8 +251,9 @@ def render_resources():
     st.video(selected["url"])
     st.caption("{} · {} · {}".format(selected.get("channel", "YouTube"), selected.get("language", ""), selected.get("duration", "")))
     progress = _progress(user_id, selected["key"]) if user_id else {"position_seconds": 0, "completed": 0}
-    minutes = int(progress.get("position_seconds", 0)) // 60
-    st.progress(1.0 if progress.get("completed") else 0.0, text="Completed" if progress.get("completed") else "Resume from {}:{:02d}".format(minutes, int(progress.get("position_seconds", 0)) % 60))
+    seconds = int(progress.get("progress_seconds", 0))
+    minutes = seconds // 60
+    st.progress(1.0 if progress.get("completed") else 0.0, text="Completed" if progress.get("completed") else "Resume from {}:{:02d}".format(minutes, seconds % 60))
     save_col, complete_col = st.columns(2)
     with save_col:
         if st.button("Save for later", use_container_width=True):
@@ -218,7 +263,7 @@ def render_resources():
     with complete_col:
         if st.button("Mark as completed", use_container_width=True):
             if user_id:
-                _save_progress(user_id, selected["key"], progress.get("position_seconds", 0), True)
+                _save_progress(user_id, selected["key"], seconds, True)
             st.success("Marked completed")
     st.markdown("### ✨ Suggested next lessons")
     suggested = videos[1:4] or videos

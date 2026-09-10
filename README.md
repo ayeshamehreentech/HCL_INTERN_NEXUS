@@ -1,205 +1,98 @@
 # HCL Intern Nexus
 
-HCL Intern Nexus is a Streamlit-based internship learning portal for students, mentors, and administrators. It combines learning plans, mentor communication, meetings, resource discovery, formula management, AI assistance, and performance reporting in one workspace.
+HCL Intern Nexus is a Streamlit internship learning portal with separate student, mentor, and administrator workspaces. It stores shared portal data in Supabase, so accounts, notices, doubts, meetings, resources, learning plans, and coding progress survive Streamlit Cloud restarts.
 
-## Features
+## What is included
 
-### Student workspace
+- Student dashboard with notices, 24/7 mentor doubt text box, learning plan, meetings, resources, Formula Vault, Helping Bot, and a continuous Python Coding Lab.
+- Mentor dashboard for student-specific meetings, private doubt replies, notices, resources, reports, and progress.
+- Administrator dashboard for users, notices, and pending account-deletion requests.
+- Focused Resources tab: normal YouTube lessons only (no Shorts), an in-app embedded player, playlist loading, horizontal lesson carousel, mentor suggestions, saved lessons, and persistent completion state.
+- YouTube Data API search and playlist metadata when `YOUTUBE_API_KEY` is configured. DuckDuckGo is retained as a safe fallback.
+- Deep-agent-inspired learning loops: the Resource workflow plans a query, detects language, filters/ranks results, and tracks learning state; the Coding Lab guides students through plan → write → check → hint → improve → next question. The practice sequence continues beyond 50 questions.
 
-- Personalized student dashboard with internship progress and days remaining.
-- AI-generated learning plans using Groq.
-- Learning checklist and progress tracking.
-- Private mentor chat for doubts, absence messages, and meeting problems.
-- Notifications and mentor notices in a dedicated tab.
-- Formula Vault with built-in formulas plus persistent custom formulas.
-- Searchable learning resources with YouTube videos and educational articles.
-- In-page selected-video playback using the official YouTube embed player.
-- Saved resources and recently searched topics.
-- Meeting joining, recording, automatic transcription, Roman-English Hindi normalization, and summaries.
-- PDF upload and retrieval-augmented Helping Bot.
+## Portal flow
 
-### Mentor workspace
-
-- Student list and student-specific activity analytics.
-- Seven-day activity chart, learning-plan count, and activity progress.
-- Typed reports and handwritten PDF attachments for individual students.
-- Weekly and monthly Groq performance reports.
-- Downloadable PDF performance reports with report history.
-- Meeting scheduling, 12-hour time selection, student email lookup, link editing, and in-page joining.
-- Private one-to-one chat with assigned students.
-- AI-assisted notice formatting, publishing, editing, and deletion.
-- Mentor-curated YouTube and blog resources with add, edit, and delete controls.
-
-### Administrator workspace
-
-- User and role management.
-- System-level dashboard statistics.
-- Notice visibility and administration.
-- Account deletion request handling.
-
-## Architecture
-
-```text
-app.py
-├── authentication.py
-├── dashboards/
-│   ├── student/
-│   ├── mentor/
-│   ├── admin/
-│   └── shared_messages.py
-├── ai/
-│   ├── learning_agent.py
-│   ├── mentor_agent.py
-│   ├── newsletter_agent.py
-│   ├── performance_agent.py
-│   └── chains.py
-└── database/
-    ├── connection.py
-    ├── users.py
-    ├── learning.py
-    ├── meetings.py
-    ├── messages.py
-    ├── resources.py
-    └── reports.py
+```mermaid
+flowchart LR
+  S[Student] --> D[Student dashboard]
+  M[Mentor] --> MD[Mentor dashboard]
+  A[Administrator] --> AD[Admin dashboard]
+  D --> R[Resources]
+  R --> Q[Topic and language detection]
+  Q --> Y[YouTube Data API]
+  Q --> DDG[DuckDuckGo fallback]
+  Y --> F[Filter normal tutorials and rank]
+  DDG --> F
+  F --> C[In-app video carousel and player]
+  C --> P[Supabase progress, saved state, completion]
+  MD --> MR[Mentor resource or notice]
+  MR --> DB[(Supabase)]
+  DB --> D
+  D --> CL[Coding Lab: plan, code, feedback, improve]
+  D --> DM[Private doubt message]
+  DM --> MD
+  D --> DR[Deletion request]
+  DR --> AD
 ```
 
-The application uses Streamlit for the interface, SQLite for persistence, Groq for AI tasks, LangChain runnables for workflow pipelines, and ReportLab for generated PDF reports.
+## Persistent Supabase database
 
-## LangChain middleware
+This release does **not** use SQLite. The database adapter uses the Supabase Data API and needs these two Streamlit secrets:
 
-The performance-report workflow uses a middleware-traced LangChain `RunnableSequence`:
-
-```text
-Collect student signals
-	↓
-Analyze with Groq
-	↓
-Render PDF report
-	↓
-Save report history
+```toml
+SUPABASE_URL = "https://your-project.supabase.co"
+SUPABASE_SECRET_KEY = "your-server-side-supabase-secret-key"
 ```
 
-Each step records its status, duration, and failure details. The Student Dashboard also traces notice loading and each major tab render.
+Before the first deployment, open **Supabase Dashboard → SQL Editor**, paste the contents of [`database/schema.sql`](database/schema.sql), and run it once. The script is safe to run again. It creates all required permanent tables, including users, activity, meetings, notices, resources, video state, private messages, coding attempts, and deletion requests.
 
-## Requirements
+Do not use a browser/public Supabase key for `SUPABASE_SECRET_KEY`, and never commit any secret to GitHub.
 
-- Python 3.11 or newer
-- A Groq API key for AI features
-- Network access for Groq and DuckDuckGo resource searches
-- A Teams meeting link if embedded meetings are required
+## Streamlit Cloud secrets
 
-## Local setup
+In Streamlit Community Cloud, open **App settings → Secrets** and add the following values (substitute your own; never put real keys in the repository):
 
-Clone the repository and enter the project directory:
+```toml
+SUPABASE_URL = "https://your-project.supabase.co"
+SUPABASE_SECRET_KEY = "your-server-side-supabase-secret-key"
+YOUTUBE_API_KEY = "your-youtube-data-api-v3-key"
+GROQ_API_KEY = "your-groq-key"
+GROQ_MODEL = "openai/gpt-oss-120b"
+GROQ_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
+WEATHERMAP_API_KEY = "your-weather-key"
+MENTOR_EMAIL = "mentor@example.com"
+TEAMS_MEETING_LINK = "https://teams.microsoft.com/your-meeting"
+INTERNSHIP_TITLE = "Gen AI Internship"
+```
+
+`YOUTUBE_API_KEY` enables reliable search cards and playlist titles/thumbnails. It must have **YouTube Data API v3** enabled in Google Cloud. If it is unavailable or quota-limited, Resources falls back to DuckDuckGo instead of crashing.
+
+## Local run
 
 ```powershell
 git clone https://github.com/ayeshamehreentech/HCL_INTERN_NEXUS.git
 cd HCL_INTERN_NEXUS
-```
-
-Create and activate a virtual environment:
-
-```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-Install dependencies:
-
-```powershell
 python -m pip install -r requirements.txt
-```
-
-Create a `.env` file from this template. Never commit real credentials:
-
-```env
-GROQ_API_KEY=replace-with-your-groq-key
-GROQ_MODEL=openai/gpt-oss-120b
-WEATHERMAP_API_KEY=replace-with-your-weather-key
-TEAMS_MEETING_LINK=https://example.com/meeting-link
-INTERNSHIP_TITLE=Gen AI Internship
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=replace-with-a-strong-password
-MENTOR_EMAIL=mentor@example.com
-```
-
-Start the application:
-
-```powershell
 streamlit run app.py
 ```
 
-Then open the local URL shown by Streamlit, normally `http://localhost:8501`.
+## Deployment checklist
 
-## Resource search
-
-The Resources tab does not require a YouTube API key. It uses server-side DuckDuckGo search to discover YouTube watch URLs and educational articles. YouTube videos are displayed through the official embedded player, and the selected video remains selected until the user chooses another one.
-
-Mentors can add trusted resources directly from the Mentor Resources page. These curated resources are merged with search results for the matching topic.
-
-## Data storage
-
-SQLite tables are initialized automatically on application startup. The database stores:
-
-- Users and roles
-- Internship activity
-- Meetings and transcripts
-- Notices
-- Learning plans and checklists
-- Mentor/student private messages
-- Mentor resources and student resource history
-- Custom formulas
-- Student reports and generated PDF data
-
-Local database files are ignored by Git. Production deployments should use a managed database if data must persist across ephemeral cloud instances.
-
-## Streamlit Community Cloud deployment
-
-1. Push the project to GitHub.
-2. Open [Streamlit Community Cloud](https://share.streamlit.io).
-3. Select `ayeshamehreentech/HCL_INTERN_NEXUS`.
-4. Choose branch `main`.
-5. Set the main file to `app.py`.
-6. Add the environment values from the `.env` template in the deployment secrets configuration.
-7. Deploy the application.
-
-Do not upload `.env`, SQLite databases, virtual environments, or API keys to GitHub. Rotate any credential that has been exposed in chat, screenshots, logs, or commits.
+1. Run `database/schema.sql` in the target Supabase project once.
+2. Set the Streamlit secrets above.
+3. Deploy branch `main` with `app.py` as the entry point.
+4. Reboot the Streamlit app after saving secrets.
 
 ## Validation
 
-Useful local checks:
-
 ```powershell
-python -m py_compile app.py
-python -m py_compile dashboards\student\dashboard.py dashboards\mentor\dashboard.py
+py -3.13 -m py_compile app.py authentication.py database\connection.py
+py -3.13 -m py_compile dashboards\student\dashboard.py dashboards\student\resources.py dashboards\student\coding_lab.py
 ```
 
-The application initializes its SQLite schema automatically, so a fresh environment can start without a separate migration command.
+## Security
 
-## License
-
-Add the project's chosen license before distributing the application publicly.
-
-## YouTube learning resources
-
-The Student **Resources** tab is a focused in-app learning flow:
-
-1. Search a topic. DuckDuckGo is used first to discover regular YouTube tutorials; Shorts are excluded.
-2. Results are shown in a horizontal carousel. Selecting **Play in app** keeps the YouTube player inside HCL Intern Nexus.
-3. Students can save a lesson, record a resume position, mark it complete, and continue with suggested lessons.
-4. Mentor-published YouTube resources appear under **Mentor Suggested**.
-5. A playlist URL or ID can be loaded directly into the same learning carousel.
-
-### Streamlit secrets
-
-Add this in Streamlit Cloud **Settings → Secrets** to enable playlist metadata (video titles, channels, and thumbnails):
-
-```toml
-YOUTUBE_API_KEY = "your-youtube-data-api-key"
-```
-
-Never commit API keys to the repository. The `google-api-python-client` dependency is included in `requirements.txt`.
-
-## SQLite compatibility
-
-The app accepts both the current user schema and an older SQLite schema that uses a `password` field instead of `password_hash`. Existing user records remain readable after deployment.
+Keys disclosed in chat, images, logs, or a commit should be rotated immediately. Use only the rotated values in Streamlit secrets; never add them to `.env`, source code, or the README.

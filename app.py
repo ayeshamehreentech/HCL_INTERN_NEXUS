@@ -15,16 +15,14 @@ from dashboards.student.dashboard import render_student_dashboard
 from dashboards.mentor.dashboard import render_mentor_dashboard
 from dashboards.admin.dashboard import render_admin_dashboard
 
-
-
-init_db()
-
 st.set_page_config(
     page_title="HCLTech GenAI Forge",
     page_icon="✦",
     layout="wide"
 )
 
+# Verify the permanent Supabase database once, after Streamlit has configured
+# the page and secrets.  A previous release ran this twice and used SQLite.
 init_db()
 
 
