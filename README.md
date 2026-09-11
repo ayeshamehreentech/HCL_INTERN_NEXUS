@@ -12,7 +12,7 @@ All shared portal data is stored in **Supabase PostgreSQL** through the Supabase
 - In-app YouTube learning: search, playlist loading, filtered regular tutorials, horizontal carousel, embedded `youtube-nocookie` player, saved items and completion state
 - Mentor resources are visible in the student's **Mentor Suggested** section
 - Python Quest Coding Lab: staged scenario worlds, learning-first links, attempts, completion progress, and coins earned after verified answers
-- Helping Bot with per-student permanent chat history, persona preferences, working memory and summary memory
+- Helping Bot with per-student permanent chat history, persona preferences, working memory and summary memory; retrieval-augmented answers grounded in permanent notices and mentor resources
 - LangChain/LangGraph-oriented deep-agent utilities for Coding Lab and HCL content workflows, with safe fallbacks when an AI provider is unavailable
 - Responsive brown/beige light and dark visual theme
 

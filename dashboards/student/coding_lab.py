@@ -30,6 +30,18 @@ JOURNEY_WORLDS = [
     ("Advanced Python", "Cyber Lock", "Combine ideas to solve larger missions."),
 ]
 
+BEGINNER_STAGES = [
+    ("Input & Output", "Shopping Cart", "Welcome a shopper by printing one short message."),
+    ("Variables", "Shopping Cart", "Put one item name or price into a variable, then print it."),
+    ("Input", "Airport Boarding", "Ask for one value with input(), then print a friendly response."),
+    ("Conditions", "Castle Gate", "Use one simple if statement with one comparison."),
+    ("Loops", "Fuel Station", "Repeat one short action with a small range()."),
+]
+
+SCENARIO_ART = {
+    "Shopping Cart": "shopping-cart-quest.png",
+}
+
 
 def _scenario_for(concept: str, level: str, completed: int) -> dict[str, str]:
     """Map a generated Python concept to a reusable story world."""
@@ -51,8 +63,21 @@ def _scenario_for(concept: str, level: str, completed: int) -> dict[str, str]:
 
 def _next_scenario(level: str, completed: int) -> dict[str, str]:
     """Choose the next reusable world from durable learner progress."""
+    if level == "Beginner":
+        concept, name, story = BEGINNER_STAGES[min(len(BEGINNER_STAGES) - 1, completed)]
+        return {"name": name, "story": story, "concept_focus": concept, "difficulty": level, "stage": str(completed + 1)}
     concept, name, story = JOURNEY_WORLDS[min(len(JOURNEY_WORLDS) - 1, completed // 3)]
     return {"name": name, "story": story, "concept_focus": concept, "difficulty": level, "stage": str(completed + 1)}
+
+
+def _render_scenario_art(scenario: dict[str, str]) -> None:
+    """Show actual quest artwork where an asset exists, not only a text label."""
+    filename = SCENARIO_ART.get(scenario.get("name", ""))
+    if not filename:
+        return
+    image_path = Path(__file__).resolve().parents[2] / "assets" / filename
+    if image_path.exists():
+        st.image(str(image_path), caption="Mission scene · {}".format(scenario["name"]), use_container_width=True)
 
 
 def _render_game_hud(completed: int, coins: int) -> None:
@@ -157,6 +182,17 @@ Frame the mission as the reusable scenario '{scenario.get('name', 'Forest Path')
 Use this optional research context only to choose an appropriate concept: {state.get('research', '')}.
 Return JSON only with title, prompt, concept, requirements (array of 2-4 strings), and starter_code.
 Do not include a solution, tests, answer, or markdown fences."""
+    if state.get("level") == "Beginner":
+        completed = int(state.get("completed_count", 0))
+        guardrail = (
+            "BEGINNER SAFETY LADDER: This learner may know nothing. "
+            "For challenges 0-1 use only print(), strings, or one variable; no input(), if, loops, lists, functions, or math. "
+            "For challenges 2-3 allow one input() or one variable plus print(). "
+            "For challenges 4-5 allow exactly one simple if comparison. "
+            "Use a single sentence mission, at most two requirements, and give a tiny starter-code comment. "
+            f"Current completed count is {completed}; obey the matching rung exactly."
+        )
+        prompt += "\n" + guardrail
     payload = _json_object(_content(_model().invoke(prompt)))
     required = ("title", "prompt", "concept", "requirements")
     if not all(payload.get(key) for key in required) or not isinstance(payload.get("requirements"), list):
@@ -356,12 +392,18 @@ def render_coding_lab() -> None:
     safe_title = html.escape(task["title"])
     st.markdown("<div style='background:linear-gradient(100deg,#063563,#0878bf);border-radius:16px;padding:1rem 1.2rem;color:#fff;margin-top:.8rem'><h3 style='color:#ffe95a;margin:0'>🏆 " + safe_title + "</h3><small>Complete this mission to earn progress toward a coin.</small></div>", unsafe_allow_html=True)
     scenario = task.get("scenario") or _scenario_for(task.get("concept", ""), task.get("category", level), completed)
-    st.info(f"🎮 **Mission world: {scenario.get('name', 'Forest Path')}** — {scenario.get('story', 'Build your Python skill one step at a time.')}")
-    st.write(task["prompt"])
-    st.caption(f"Concept: {task['concept']}")
-    st.markdown("**Success criteria**")
-    for requirement in task["requirements"]:
-        st.markdown(f"- {requirement}")
+    scene, briefing = st.columns([1, 1.35], gap="large")
+    with scene:
+        _render_scenario_art(scenario)
+        st.info(f"🎮 **Mission world: {scenario.get('name', 'Forest Path')}**")
+    with briefing:
+        st.markdown("#### Quest briefing")
+        st.write(scenario.get("story", "Build your Python skill one step at a time."))
+        st.write(task["prompt"])
+        st.caption(f"Skill unlocked: {task['concept']}")
+        st.markdown("**Win this quest by**")
+        for requirement in task["requirements"]:
+            st.markdown(f"- {requirement}")
 
     if not _render_learn_first(task):
         st.info("Start with one free learning resource above. When you are ready, tick the box to open your coding workspace.")

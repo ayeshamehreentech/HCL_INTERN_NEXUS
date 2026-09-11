@@ -2,6 +2,7 @@ import os, re
 import requests
 import streamlit as st
 from groq import Groq
+from ai.portal_rag import retrieve_portal_context
 from database.helping_bot import (
     NEW_CHAT_MARKER,
     clear_helping_bot_history,
@@ -53,15 +54,21 @@ def W(question):
 
 def A(question, history, temperature, custom_instruction=""):
     key = S("GROQ_API_KEY")
-    if not key: return "Your question was saved. Add GROQ_API_KEY to enable AI replies."
+    context, sources = retrieve_portal_context(question)
+    if not key: return "Your question was saved. Add GROQ_API_KEY to enable AI replies.", sources
     system = "You are a patient internship learning assistant. Teach simply and do not invent facts."
+    if context:
+        system += "\nUse the retrieved portal information below when it is relevant. Treat it as factual context; say when it does not answer the question.\nRETRIEVED CONTEXT:\n" + context
     if custom_instruction.strip():
         system += " Adopt this requested teaching style: " + custom_instruction.strip()[:600]
         system += " Be supportive, but do not claim to be a real parent, mentor, or person."
     messages = [{"role":"system", "content":system}]
     messages += [{"role":x["role"], "content":x["content"]} for x in history[-12:]] + [{"role":"user", "content":question}]
-    try: return Groq(api_key=key).chat.completions.create(model=S("GROQ_MODEL") or "openai/gpt-oss-120b", messages=messages, temperature=temperature).choices[0].message.content.strip()
-    except Exception: return "I saved your question, but the AI service is temporarily unavailable."
+    try:
+        answer = Groq(api_key=key).chat.completions.create(model=S("GROQ_MODEL") or "openai/gpt-oss-120b", messages=messages, temperature=temperature).choices[0].message.content.strip()
+        return answer, sources
+    except Exception:
+        return "I saved your question, but the AI service is temporarily unavailable.", sources
 
 def render_helping_bot_tab():
     user_id = st.session_state.get("user_id")
@@ -110,6 +117,7 @@ def render_helping_bot_tab():
                 st.error("History could not be cleared.")
 
         st.subheader("Memory")
+        st.caption("RAG is enabled: the bot retrieves matching permanent notices and mentor resources before it answers. It uses transparent lexical retrieval, not a hidden vector database.")
         current_chat = chats[selected]
         saved_working = latest_helping_bot_memory(rows, "working") or {}
         saved_summary = latest_helping_bot_memory(rows, "summary") or {}
@@ -150,8 +158,15 @@ def render_helping_bot_tab():
         save_helping_bot_message(user_id, "user", question)
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                answer = W(question) if any(k in question.lower() for k in ("weather","temperature","forecast","humidity","rain")) else A(question, history, temperature, custom_instruction)
+                if any(k in question.lower() for k in ("weather","temperature","forecast","humidity","rain")):
+                    answer, rag_sources = W(question), []
+                else:
+                    answer, rag_sources = A(question, history, temperature, custom_instruction)
             st.write(answer)
+            if rag_sources:
+                with st.expander("Retrieved portal sources", expanded=False):
+                    for source in rag_sources:
+                        st.write("- " + source)
         save_helping_bot_message(user_id, "assistant", answer)
         saved_context = (history + [
             {"role": "user", "content": question},
