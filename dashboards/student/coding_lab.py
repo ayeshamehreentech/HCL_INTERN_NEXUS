@@ -51,7 +51,7 @@ PYQUEST_STAGES = [
 
 SCENARIO_ART = {
     "Shopping Cart": "shopping-cart-quest.png",
-    "Fuel Station": "fuel-station-quest.svg",
+    "Fuel Station": "fuel-station-events.png",
     "Castle Gate": "castle-gate-quest.png",
 }
 
@@ -142,16 +142,21 @@ def _render_game_event_scene(scenario_id: str, events: list[str], coins: int) ->
     events = validated_events(events)
     if not events:
         return
-    image = {"CASTLE_GATE": "castle-gate-quest.png", "FUEL_STATION": "fuel-station-quest.svg"}.get(scenario_id, "shopping-cart-quest.png")
+    image = {"CASTLE_GATE": "castle-gate-quest.png", "FUEL_STATION": "fuel-station-events.png"}.get(scenario_id, "shopping-cart-quest.png")
+    scenario_class = "fuel" if scenario_id == "FUEL_STATION" else "quest"
     event_json = json.dumps(events)
     scene_html = """<html><style>
       body{margin:0;font-family:Arial,sans-serif;background:#f7ead9}.scene{position:relative;overflow:hidden;height:390px;border:3px solid #9a6948;border-radius:18px;background:url('{IMAGE}') center/cover;box-shadow:0 10px 20px #4b2e2444}.veil{position:absolute;inset:0;background:#311a0a55}.gate{position:absolute;left:36%;bottom:0;width:28%;height:62%;display:flex;z-index:2}.door{width:50%;background:linear-gradient(90deg,#3c2012,#704124);border:3px solid #d3a46b;transition:transform .7s ease}.door:first-child{border-radius:11px 0 0 0}.door:last-child{border-radius:0 11px 0 0}.gate.shake{animation:shake .4s}.gate.open .door:first-child{transform:translateX(-105%) rotateY(55deg)}.gate.open .door:last-child{transform:translateX(105%) rotateY(-55deg)}.key{position:absolute;right:18%;bottom:26%;font-size:52px;filter:drop-shadow(0 0 10px #ffe8a0);z-index:4}.hero{position:absolute;bottom:7%;left:22%;font-size:48px;z-index:4;transition:transform .7s}.hero.move{transform:translateX(210px) scale(1.15)}.banner{position:absolute;top:18px;left:50%;transform:translateX(-50%);z-index:5;padding:10px 18px;border-radius:20px;background:#4b2e24e8;border:1px solid #f1cd95;color:#fff5e5;font-weight:800}.wallet{position:absolute;top:18px;right:18px;z-index:6;background:#342016e8;border:1px solid #efc57f;border-radius:12px;padding:9px 13px;color:#ffe49a;font-weight:900}.coin{position:absolute;z-index:7;font-size:34px;transition:all .8s cubic-bezier(.2,.8,.2,1)}.glow{position:absolute;inset:0;opacity:0;background:#ffe6a455;transition:opacity .5s}.glow.on{opacity:1}@keyframes shake{25%{translate:-9px 0}50%{translate:9px 0}75%{translate:-5px 0}}
-    </style><body><div class='scene'><div id='glow' class='glow'></div><div class='veil'></div><div id='banner' class='banner'>Quest event</div><div id='wallet' class='wallet'>🪙 {COINS}</div><div id='gate' class='gate'><div class='door'></div><div class='door'></div></div><div id='hero' class='hero'>🧑‍💻</div><div class='key'>🔑</div></div><script>
+    </style><body><div class='scene {SCENARIO_CLASS}'><div id='glow' class='glow'></div><div class='veil'></div><div id='banner' class='banner'>Quest event</div><div id='wallet' class='wallet'>🪙 {COINS}</div><div id='gate' class='gate'><div class='door'></div><div class='door'></div></div><div id='hero' class='hero'>🧑‍💻</div><div class='key'>🔑</div></div><script>
       const events={EVENTS};const gate=document.getElementById('gate'),hero=document.getElementById('hero'),banner=document.getElementById('banner'),wallet=document.getElementById('wallet'),glow=document.getElementById('glow');let gained=0;
       function coin(){const c=document.createElement('div');c.className='coin';c.textContent='🪙';c.style.left='48%';c.style.top='55%';document.querySelector('.scene').appendChild(c);requestAnimationFrame(()=>{c.style.left='88%';c.style.top='8%';c.style.transform='scale(.45) rotate(540deg)';c.style.opacity='0'});setTimeout(()=>{gained+=10;wallet.textContent='🪙 '+({COINS}+gained);c.remove()},850)}
       function handleGameEvent(event){if(event==='CASTLE_GATE_SHAKE'||event==='WRONG_CODE'){banner.textContent='Not quite — the gate is still locked. Ask for a hint and try again.';gate.classList.add('shake');setTimeout(()=>gate.classList.remove('shake'),450)}if(event==='CASTLE_GATE_UNLOCKED'){banner.textContent='The key fits! Unlocking the gate…'}if(event==='CASTLE_GATE_OPEN'||event==='DOOR_OPEN'){banner.textContent='Gate open! You solved the quest.';gate.classList.add('open');hero.classList.add('move');glow.classList.add('on')}if(event==='COIN_COLLECTED'||event==='TREASURE_REVEALED'){coin()}if(event==='MISSION_COMPLETE'){banner.textContent='Mission complete! Your XP and coin reward are saved.'}if(event==='LEVEL_UP'){banner.textContent='✨ CHECKPOINT UNLOCKED — a new world is ready!'}}
       events.forEach((event,index)=>setTimeout(()=>handleGameEvent(event),index*720));
-    </script></body></html>""".replace("{IMAGE}", _asset_data(image)).replace("{EVENTS}", event_json).replace("{COINS}", str(coins))
+    </script></body></html>""".replace("{IMAGE}", _asset_data(image)).replace("{EVENTS}", event_json).replace("{COINS}", str(coins)).replace("{SCENARIO_CLASS}", scenario_class)
+    if scenario_id == "FUEL_STATION":
+        fuel_js = """function handleFuelEvent(event){if(event==='CAR_START')banner.textContent='Car started — fuel level checked.';if(event==='CAR_MOVE')banner.textContent='Car moving toward the fuel station…';if(event==='CAR_STOP')banner.textContent='Car stopped at the fuel station.';if(event==='CAR_REACHES_STATION')banner.textContent='Station reached — refuel now.';if(event==='FUEL_LOW')banner.textContent='Fuel low! Time to refuel.';if(event==='FUEL_FILLED'){banner.textContent='Fuel filled — tank is full. Journey continues!';glow.classList.add('on');coin()}};const baseGameEvent=handleGameEvent;handleGameEvent=function(event){baseGameEvent(event);handleFuelEvent(event)};"""
+        scene_html = scene_html.replace("events.forEach", fuel_js + "events.forEach")
+    scene_html = scene_html.replace("</style>", ".scene.fuel .gate,.scene.fuel .key,.scene.fuel .hero{display:none}.scene.fuel .veil{background:#311a0a18}.scene.fuel .banner{background:#4b2e24f2}</style>")
     components.html(scene_html, height=400, scrolling=False)
 
 
