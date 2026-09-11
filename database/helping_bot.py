@@ -1,9 +1,11 @@
-"""Supabase persistence for Helping Bot conversations."""
+"""Supabase persistence for Helping Bot conversations and memory snapshots."""
+import json
 from datetime import datetime, timezone
 
 from .connection import get_connection
 
 NEW_CHAT_MARKER = "__HCL_NEW_CHAT__"
+MEMORY_PREFIX = "__HCL_BOT_MEMORY__:"
 
 
 def _client():
@@ -34,6 +36,47 @@ def save_helping_bot_message(user_id, role, content):
 def start_helping_bot_chat(user_id):
     """Persist a private new-chat boundary without changing the Supabase schema."""
     return save_helping_bot_message(user_id, "assistant", NEW_CHAT_MARKER)
+
+
+def save_helping_bot_memory(user_id, kind, payload):
+    """Persist a private memory/profile record using the existing Supabase table.
+
+    Keeping these records in the student's message stream avoids a breaking schema
+    migration while preserving user isolation and permanent storage.
+    """
+    if kind not in {"profile", "working", "summary"}:
+        return None
+    record = {
+        "kind": kind,
+        "payload": payload,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return save_helping_bot_message(
+        user_id,
+        "assistant",
+        MEMORY_PREFIX + json.dumps(record, ensure_ascii=False),
+    )
+
+
+def latest_helping_bot_memory(rows, kind):
+    """Read the newest permanent record of one memory type from loaded rows."""
+    for row in reversed(rows):
+        content = str(row.get("content", ""))
+        if not content.startswith(MEMORY_PREFIX):
+            continue
+        try:
+            record = json.loads(content[len(MEMORY_PREFIX):])
+            if record.get("kind") == kind:
+                return record
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return None
+
+
+def is_helping_bot_internal_record(row):
+    """Hide control/memory records from the conversational transcript."""
+    content = str(row.get("content", ""))
+    return content == NEW_CHAT_MARKER or content.startswith(MEMORY_PREFIX)
 
 
 def clear_helping_bot_history(user_id):
