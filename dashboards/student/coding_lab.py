@@ -17,6 +17,7 @@ from langchain_groq import ChatGroq
 from langgraph.graph import END, START, StateGraph
 
 from ai.config import get_groq_api_key, get_groq_model
+from ai.pyquest_events import outcome_events, validated_events
 from database.connection import get_connection
 
 
@@ -39,8 +40,18 @@ BEGINNER_STAGES = [
     ("Loops", "Fuel Station", "Repeat one short action with a small range()."),
 ]
 
+PYQUEST_STAGES = [
+    {"key": "print", "title": "Python Village · First Words", "concept": "print()", "scenario": "SHOPPING_CART", "world": "Shopping Cart", "need": 3},
+    {"key": "input", "title": "Airport Check-in · Taking Input", "concept": "input()", "scenario": "LOCKED_DOOR", "world": "Locked Door", "need": 3},
+    {"key": "variables", "title": "Mall Mission · Variables", "concept": "variables", "scenario": "FUEL_STATION", "world": "Fuel Station", "need": 3},
+    {"key": "conditions", "title": "Castle Kingdom · Conditions", "concept": "if / else", "scenario": "CASTLE_GATE", "world": "Castle Gate", "need": 3},
+    {"key": "loops", "title": "Loop Forest · Repetition", "concept": "for loops", "scenario": "TREASURE_COLLECTION", "world": "Treasure Collection", "need": 3},
+    {"key": "functions", "title": "Function Factory · Reuse", "concept": "functions", "scenario": "ROBOT_REPAIR", "world": "Robot Repair", "need": 3},
+]
+
 SCENARIO_ART = {
     "Shopping Cart": "shopping-cart-quest.png",
+    "Fuel Station": "fuel-station-quest.svg",
 }
 
 
@@ -121,7 +132,26 @@ def _asset_data(filename: str) -> str:
     path = Path(__file__).resolve().parents[2] / "assets" / filename
     if not path.exists():
         return ""
-    return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+    mime = "image/svg+xml" if path.suffix.lower() == ".svg" else "image/png"
+    return "data:{};base64,".format(mime) + base64.b64encode(path.read_bytes()).decode("ascii")
+
+
+def _render_game_event_scene(scenario_id: str, events: list[str], coins: int) -> None:
+    """Render only fixed HTML/CSS/JS animation handlers for allowlisted Python events."""
+    events = validated_events(events)
+    if not events:
+        return
+    image = {"CASTLE_GATE": "castle-gate-quest.png", "FUEL_STATION": "fuel-station-quest.svg"}.get(scenario_id, "shopping-cart-quest.png")
+    event_json = json.dumps(events)
+    scene_html = """<html><style>
+      body{margin:0;font-family:Arial,sans-serif;background:#f7ead9}.scene{position:relative;overflow:hidden;height:390px;border:3px solid #9a6948;border-radius:18px;background:url('{IMAGE}') center/cover;box-shadow:0 10px 20px #4b2e2444}.veil{position:absolute;inset:0;background:#311a0a55}.gate{position:absolute;left:36%;bottom:0;width:28%;height:62%;display:flex;z-index:2}.door{width:50%;background:linear-gradient(90deg,#3c2012,#704124);border:3px solid #d3a46b;transition:transform .7s ease}.door:first-child{border-radius:11px 0 0 0}.door:last-child{border-radius:0 11px 0 0}.gate.shake{animation:shake .4s}.gate.open .door:first-child{transform:translateX(-105%) rotateY(55deg)}.gate.open .door:last-child{transform:translateX(105%) rotateY(-55deg)}.key{position:absolute;right:18%;bottom:26%;font-size:52px;filter:drop-shadow(0 0 10px #ffe8a0);z-index:4}.hero{position:absolute;bottom:7%;left:22%;font-size:48px;z-index:4;transition:transform .7s}.hero.move{transform:translateX(210px) scale(1.15)}.banner{position:absolute;top:18px;left:50%;transform:translateX(-50%);z-index:5;padding:10px 18px;border-radius:20px;background:#4b2e24e8;border:1px solid #f1cd95;color:#fff5e5;font-weight:800}.wallet{position:absolute;top:18px;right:18px;z-index:6;background:#342016e8;border:1px solid #efc57f;border-radius:12px;padding:9px 13px;color:#ffe49a;font-weight:900}.coin{position:absolute;z-index:7;font-size:34px;transition:all .8s cubic-bezier(.2,.8,.2,1)}.glow{position:absolute;inset:0;opacity:0;background:#ffe6a455;transition:opacity .5s}.glow.on{opacity:1}@keyframes shake{25%{translate:-9px 0}50%{translate:9px 0}75%{translate:-5px 0}}
+    </style><body><div class='scene'><div id='glow' class='glow'></div><div class='veil'></div><div id='banner' class='banner'>Quest event</div><div id='wallet' class='wallet'>🪙 {COINS}</div><div id='gate' class='gate'><div class='door'></div><div class='door'></div></div><div id='hero' class='hero'>🧑‍💻</div><div class='key'>🔑</div></div><script>
+      const events={EVENTS};const gate=document.getElementById('gate'),hero=document.getElementById('hero'),banner=document.getElementById('banner'),wallet=document.getElementById('wallet'),glow=document.getElementById('glow');let gained=0;
+      function coin(){const c=document.createElement('div');c.className='coin';c.textContent='🪙';c.style.left='48%';c.style.top='55%';document.querySelector('.scene').appendChild(c);requestAnimationFrame(()=>{c.style.left='88%';c.style.top='8%';c.style.transform='scale(.45) rotate(540deg)';c.style.opacity='0'});setTimeout(()=>{gained+=10;wallet.textContent='🪙 '+({COINS}+gained);c.remove()},850)}
+      function handleGameEvent(event){if(event==='CASTLE_GATE_SHAKE'||event==='WRONG_CODE'){banner.textContent='Not quite — the gate is still locked. Ask for a hint and try again.';gate.classList.add('shake');setTimeout(()=>gate.classList.remove('shake'),450)}if(event==='CASTLE_GATE_UNLOCKED'){banner.textContent='The key fits! Unlocking the gate…'}if(event==='CASTLE_GATE_OPEN'||event==='DOOR_OPEN'){banner.textContent='Gate open! You solved the quest.';gate.classList.add('open');hero.classList.add('move');glow.classList.add('on')}if(event==='COIN_COLLECTED'||event==='TREASURE_REVEALED'){coin()}if(event==='MISSION_COMPLETE'){banner.textContent='Mission complete! Your XP and coin reward are saved.'}if(event==='LEVEL_UP'){banner.textContent='✨ CHECKPOINT UNLOCKED — a new world is ready!'}}
+      events.forEach((event,index)=>setTimeout(()=>handleGameEvent(event),index*720));
+    </script></body></html>""".replace("{IMAGE}", _asset_data(image)).replace("{EVENTS}", event_json).replace("{COINS}", str(coins))
+    components.html(scene_html, height=400, scrolling=False)
 
 
 def _render_interactive_game(completed: int, coins: int) -> None:
@@ -309,6 +339,36 @@ def _count_completed(user_id: int) -> int:
         conn.close()
 
 
+def _count_stage_completed(user_id: int, stage_key: str) -> int:
+    """Mastery requires several distinct verified challenges in the same skill."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT question_key) AS total FROM coding_lab_attempts WHERE user_id = ? AND category = ? AND passed = 1",
+            (user_id, stage_key),
+        ).fetchone()
+        return int(row["total"]) if row else 0
+    finally:
+        conn.close()
+
+
+def _current_pyquest_stage(user_id: int) -> tuple[dict[str, str], int, int]:
+    for stage in PYQUEST_STAGES:
+        progress = _count_stage_completed(user_id, stage["key"])
+        if progress < stage["need"]:
+            return stage, progress, stage["need"]
+    final = PYQUEST_STAGES[-1]
+    return final, final["need"], final["need"]
+
+
+def _stage_scenario(stage: dict[str, str], completed: int) -> dict[str, str]:
+    return {
+        "name": stage["world"], "story": "Master {} through small, friendly missions before moving on.".format(stage["concept"]),
+        "concept_focus": stage["concept"], "difficulty": "Beginner", "stage": str(completed + 1),
+        "scenario_id": stage["scenario"], "mastery_stage": stage["key"],
+    }
+
+
 def _count_unlocks(user_id: int) -> int:
     conn = get_connection()
     try:
@@ -368,6 +428,78 @@ def _student_id() -> int | None:
     return int(value) if value else None
 
 
+def _tutorial_pages(stage_key: str) -> list[tuple[str, str, str]]:
+    """Fixed teaching scenes; AI creates missions only after foundations are shown."""
+    common = [
+        ("Your quest rule", "You never need to memorize everything. Read one small idea, see an example, then try it yourself.", "🗺️"),
+    ]
+    lessons = {
+        "print": [
+            ("Meet print()", "`print()` tells Python to show a message. It is like asking the Shopping Cart sign to speak to a shopper.", "🛒"),
+            ("Your first line", "Example: `print(\"Hello!\")`\n\nThe text goes inside quotes because it is a string.", "💬"),
+            ("Data types", "Python stores different kinds of data: text (`\"apple\"`), whole numbers (`5`), decimal numbers (`2.5`), and true/false values (`True`).", "📦"),
+            ("Comments help humans", "A comment starts with `#`. Python ignores it, but it helps you remember your plan.\n\nExample: `# greet the shopper`", "📝"),
+        ],
+        "input": [
+            ("Meet input()", "`input()` lets your program ask the user a question while it is running. The answer arrives as text.", "🎤"),
+            ("Ask, then display", "Example: `name = input(\"What is your name? \")` then `print(name)`.", "⌨️"),
+            ("Variables are labeled boxes", "`name` is a variable. It remembers the answer so you can use it later.", "📦"),
+        ],
+        "variables": [
+            ("Store information", "A variable is a name that points to a value: `item = \"apple\"`.", "🛍️"),
+            ("Use the value", "You can show it with `print(item)`. Keep names short and meaningful.", "🏷️"),
+        ],
+        "conditions": [
+            ("Make a decision", "`if` checks a rule. Your program chooses what to do when the rule is true or false.", "🏰"),
+            ("A simple gate", "Example: `if age >= 18:` followed by an indented `print(\"Gate open\")`.", "🔑"),
+        ],
+        "loops": [("Repeat safely", "A loop repeats a small action. Start with `for number in range(3):`.", "🔁")],
+        "functions": [("Build a helper", "A function gives a repeated job a name, so your program stays organized.", "🤖")],
+    }
+    return common + lessons.get(stage_key, [])
+
+
+def _render_pre_level_tutorial(stage: dict[str, str]) -> bool:
+    pages = _tutorial_pages(stage["key"])
+    state_key = "pyquest_lesson_page_{}".format(stage["key"])
+    page = min(int(st.session_state.get(state_key, 0)), len(pages) - 1)
+    title, copy, icon = pages[page]
+    st.markdown("<div style='padding:1.35rem;border:2px solid #b7835e;border-radius:18px;background:linear-gradient(135deg,#fff7eb,#ead4bd);color:#4b2e24'><div style='font-size:2rem'>{}</div><h3 style='margin:.2rem 0;color:#4b2e24'>Story lesson {}/{} · {}</h3><div style='white-space:pre-line;line-height:1.65'>{}</div></div>".format(icon, page + 1, len(pages), html.escape(title), html.escape(copy)), unsafe_allow_html=True)
+    previous, next_page, start = st.columns(3)
+    with previous:
+        if st.button("← Previous", disabled=page == 0, key="tutorial_previous_" + stage["key"]):
+            st.session_state[state_key] = page - 1
+            st.rerun()
+    with next_page:
+        if st.button("Next lesson →", disabled=page >= len(pages) - 1, key="tutorial_next_" + stage["key"]):
+            st.session_state[state_key] = page + 1
+            st.rerun()
+    with start:
+        return st.button("▶ Start this level", type="primary", disabled=page < len(pages) - 1, key="tutorial_start_" + stage["key"], use_container_width=True)
+    return False
+
+
+def _start_stage_quest(user_id: int, stage: dict[str, str], completed: int, session_key: str, history_key: str) -> None:
+    """Python/LangGraph starts a quest only after the learner finishes the story lesson."""
+    with st.spinner("The Python learning engine is preparing your next small mission…"):
+        scenario = _stage_scenario(stage, completed)
+        result = run_coding_agent(
+            "generate", level="Beginner", completed_count=completed,
+            previous_titles=st.session_state.get(history_key, []), scenario=scenario,
+        )
+    task = result.get("task")
+    if not task:
+        st.warning(result.get("error", "The planner did not return a challenge. Please try again."))
+        return
+    task["category"] = stage["key"]
+    task["mastery_stage"] = stage["key"]
+    task["scenario"] = scenario
+    st.session_state[session_key] = task
+    st.session_state[history_key] = (st.session_state.get(history_key, []) + [task["title"]])[-30:]
+    st.session_state.pop(f"coding_lab_answer_{user_id}", None)
+    st.rerun()
+
+
 def render_coding_lab() -> None:
     """Render an endless, adaptive Python practice loop."""
     user_id = _student_id()
@@ -391,34 +523,30 @@ def render_coding_lab() -> None:
     with next_up:
         st.metric("Next coin", 3 - progress_in_coin_cycle if progress_in_coin_cycle else 3)
 
+    stage, stage_progress, stage_goal = _current_pyquest_stage(user_id)
+    pending_events = validated_events(st.session_state.pop("pyquest_game_events", []))
+    event_scenario = str(st.session_state.pop("pyquest_event_scenario", stage["scenario"]))
+    if pending_events:
+        _render_game_event_scene(event_scenario, pending_events, coins)
     st.markdown("### 🎮 Mission Control")
-    level = st.selectbox("Choose your current level", ["Beginner", "Intermediate", "Advanced"], key="coding_lab_level")
+    st.caption("Current learning world: **{}** · {} · Mastery: {}/{} verified missions".format(stage["title"], stage["concept"], stage_progress, stage_goal))
     session_key = f"coding_lab_task_{user_id}"
     history_key = f"coding_lab_titles_{user_id}"
     task = st.session_state.get(session_key)
 
-    if st.button("✨ Start my next quest", type="primary", use_container_width=True):
-        with st.spinner("The LangGraph planner is researching and creating a challenge…"):
+    if not task:
+        if _render_pre_level_tutorial(stage):
             try:
-                scenario = _next_scenario(level, completed)
-                result = run_coding_agent("generate", level=level, completed_count=completed, previous_titles=st.session_state.get(history_key, []), scenario=scenario)
-                if result.get("task"):
-                    st.session_state[session_key] = result["task"]
-                    st.session_state[history_key] = (st.session_state.get(history_key, []) + [result["task"]["title"]])[-30:]
-                    st.session_state.pop(f"coding_lab_answer_{user_id}", None)
-                    st.rerun()
-                st.warning(result.get("error", "The planner did not return a challenge. Please try again."))
+                _start_stage_quest(user_id, stage, completed, session_key, history_key)
             except Exception:
                 st.error("The AI tutor is temporarily unavailable. Please try again shortly.")
-        return
-
-    if not task:
-        st.info("Choose a level, then start a fresh AI-generated quest. Every mission teaches one small Python idea before you code.")
+        else:
+            st.info("Read each story lesson, then the Start Level button will unlock your first AI-generated mission.")
         return
 
     safe_title = html.escape(task["title"])
     st.markdown("<div style='background:linear-gradient(100deg,#063563,#0878bf);border-radius:16px;padding:1rem 1.2rem;color:#fff;margin-top:.8rem'><h3 style='color:#ffe95a;margin:0'>🏆 " + safe_title + "</h3><small>Complete this mission to earn progress toward a coin.</small></div>", unsafe_allow_html=True)
-    scenario = task.get("scenario") or _scenario_for(task.get("concept", ""), task.get("category", level), completed)
+    scenario = task.get("scenario") or _stage_scenario(stage, completed)
     scene, briefing = st.columns([1, 1.35], gap="large")
     with scene:
         _render_scenario_art(scenario)
@@ -453,15 +581,16 @@ def render_coding_lab() -> None:
                     _save_attempt(user_id, task, code, passed, feedback)
                     if passed:
                         next_completed = completed + 1
-                        st.success("Correct answer verified! +1 progress point added to your coin bar.")
-                        if next_completed % 3 == 0:
-                            coin_progress.progress(1.0, text="3/3 correct answers — 🪙 answer coin earned!")
-                            st.balloons()
-                            st.success("🪙 Coin earned! Use it only when you truly need a reference answer.")
-                        else:
-                            coin_progress.progress((next_completed % 3) / 3, text=f"{next_completed % 3}/3 correct answers toward your next 🪙 answer coin")
-                            st.info(f"{next_completed % 3}/3 correct answers toward your next answer coin.")
+                        next_stage_progress = stage_progress + 1
+                        scenario_id = str((task.get("scenario") or {}).get("scenario_id", stage["scenario"]))
+                        st.session_state["pyquest_game_events"] = outcome_events(scenario_id, True, level_up=next_stage_progress >= stage_goal)
+                        st.session_state["pyquest_event_scenario"] = scenario_id
+                        st.session_state.pop(session_key, None)
+                        st.success("Correct answer verified! Your scene reward is ready.")
+                        st.rerun()
                     else:
+                        scenario_id = str((task.get("scenario") or {}).get("scenario_id", stage["scenario"]))
+                        _render_game_event_scene(scenario_id, outcome_events(scenario_id, False), coins)
                         st.info(feedback)
                 except Exception:
                     st.error("The review node is temporarily unavailable. Your work has not been marked.")

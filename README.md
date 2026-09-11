@@ -13,6 +13,7 @@ All shared portal data is stored in **Supabase PostgreSQL** through the Supabase
 - Mentor resources are visible in the student's **Mentor Suggested** section
 - Python Quest Coding Lab: an interactive HTML/CSS/JavaScript Home/Map/Levels mini-game, staged scenario worlds, learn-before-code lessons, attempts, completion progress, and coins earned after verified answers
 - Helping Bot with per-student permanent chat history, persona preferences, working memory and summary memory; retrieval-augmented answers grounded in permanent notices and mentor resources
+- PyQuest uses a validated Python event registry: LangGraph/Python selects an allowlisted event, then the embedded JavaScript runs only predefined scene animations (never AI-generated browser code)
 - LangChain/LangGraph-oriented deep-agent utilities for Coding Lab and HCL content workflows, with safe fallbacks when an AI provider is unavailable
 - Responsive brown/beige light and dark visual theme
 
