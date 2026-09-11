@@ -61,3 +61,17 @@ streamlit run app.py
 ## Security
 
 Rotate any key exposed in chat, screenshots, logs, or commits. Keep all API keys only in Streamlit Secrets.
+
+
+## Production Docker deployment
+
+The application image is stateless. Supabase remains the external, permanent database; it is intentionally not run inside the application container.
+
+1. Copy the secret template: `cp .env.example .env` (Windows PowerShell: `Copy-Item .env.example .env`).
+2. Put your current production keys in `.env`. Do not commit this file.
+3. Start the service: `docker compose up --build -d`.
+4. Open `http://localhost:8501` (or set `HOST_PORT` before starting).
+5. Inspect service output: `docker compose logs -f app`.
+6. Stop it: `docker compose down`.
+
+The Docker image runs Streamlit as a non-root user, exposes only port 8501, includes an HTTP health check, and restarts automatically unless stopped.
