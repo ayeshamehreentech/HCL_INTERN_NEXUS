@@ -1,71 +1,66 @@
-"""Student Helping Bot with private, permanent Supabase chat history."""
-import os
-
+import os, re
+import requests
 import streamlit as st
 from groq import Groq
+from database.helping_bot import NEW_CHAT_MARKER, clear_helping_bot_history, list_helping_bot_messages, save_helping_bot_message, start_helping_bot_chat
 
-from database.helping_bot import clear_helping_bot_history, list_helping_bot_messages, save_helping_bot_message
+def S(name):
+    try: return st.secrets.get(name, os.getenv(name, ""))
+    except Exception: return os.getenv(name, "")
 
+def H(rows):
+    marker = max((i for i, row in enumerate(rows) if row.get("content") == NEW_CHAT_MARKER), default=-1)
+    return [row for row in rows[marker + 1:] if row.get("role") in {"user", "assistant"}]
 
-def _current_user_id():
-    """Read the same authenticated ID used by the student dashboard."""
-    user_id = st.session_state.get("user_id")
-    if user_id:
-        return user_id
-    user = st.session_state.get("user") or st.session_state.get("current_user") or {}
-    return user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
-
-
-def _setting(name, default=""):
+def W(question):
+    key = S("WEATHERMAP_API_KEY")
+    match = re.search(r"\b(?:in|at)\s+([^?]+)", question, re.I)
+    if not key: return "Add WEATHERMAP_API_KEY to Streamlit secrets for live weather."
+    if not match: return "Please include a city, for example: weather in Nellore."
     try:
-        return st.secrets.get(name, os.getenv(name, default))
-    except Exception:
-        return os.getenv(name, default)
+        place = requests.get("https://api.openweathermap.org/geo/1.0/direct", params={"q": match.group(1).strip(), "limit": 1, "appid": key}, timeout=8).json()[0]
+        data = requests.get("https://api.openweathermap.org/data/2.5/weather", params={"lat": place["lat"], "lon": place["lon"], "units": "metric", "appid": key}, timeout=8).json()
+        main = data["main"]; desc = data["weather"][0]["description"].capitalize()
+        return f"**{place['name']}**: {desc}, **{main['temp']} C**, feels like {main['feels_like']} C; humidity {main['humidity']}%."
+    except Exception: return "I could not retrieve live weather right now. Please try again shortly."
 
-
-def _generate_answer(question, history):
-    api_key = _setting("GROQ_API_KEY")
-    if not api_key:
-        return "Your question was saved. Add GROQ_API_KEY to Streamlit secrets to enable AI replies."
-    messages = [{"role": "system", "content": "You are Helping Bot for an internship learning portal. Teach patiently with simple examples and do not invent facts."}]
-    messages.extend({"role": item["role"], "content": item["content"]} for item in history[-12:] if item.get("role") in {"user", "assistant"} and item.get("content"))
-    messages.append({"role": "user", "content": question})
-    try:
-        response = Groq(api_key=api_key).chat.completions.create(model=_setting("GROQ_MODEL", "openai/gpt-oss-120b"), messages=messages, temperature=0.25)
-        return response.choices[0].message.content.strip()
-    except Exception:
-        return "I saved your question, but the AI service is temporarily unavailable. Please try again in a moment."
-
+def A(question, history, temperature):
+    key = S("GROQ_API_KEY")
+    if not key: return "Your question was saved. Add GROQ_API_KEY to enable AI replies."
+    messages = [{"role":"system", "content":"You are a patient internship learning assistant. Teach simply and do not invent facts."}]
+    messages += [{"role":x["role"], "content":x["content"]} for x in history[-12:]] + [{"role":"user", "content":question}]
+    try: return Groq(api_key=key).chat.completions.create(model=S("GROQ_MODEL") or "openai/gpt-oss-120b", messages=messages, temperature=temperature).choices[0].message.content.strip()
+    except Exception: return "I saved your question, but the AI service is temporarily unavailable."
 
 def render_helping_bot_tab():
-    """Render the permanent, private per-student chat."""
-    user_id = _current_user_id()
-    st.title("🤖 Helping Bot")
-    st.caption("Ask at any time. Your conversation is private to your student account.")
+    user_id = st.session_state.get("user_id")
+    st.title("Helping Bot")
     if not user_id:
-        st.info("Please sign in again to use Helping Bot.")
-        return
-    history = list_helping_bot_messages(user_id)
-    info_col, clear_col = st.columns([5, 1])
-    with info_col:
-        st.caption(f"{len(history)} messages saved permanently in Supabase.")
-    with clear_col:
-        if st.button("Clear history", key="clear_helping_history", use_container_width=True):
-            if clear_helping_bot_history(user_id):
-                st.rerun()
-            st.error("History could not be cleared. Please try again.")
-    for message in history:
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
-    question = st.chat_input("Ask for help with Python, your internship, or a concept…")
-    if not question:
-        return
-    with st.chat_message("user"):
-        st.write(question)
-    save_helping_bot_message(user_id, "user", question)
-    with st.chat_message("assistant"):
-        with st.spinner("Helping you understand…"):
-            answer = _generate_answer(question, history)
-        st.write(answer)
-    save_helping_bot_message(user_id, "assistant", answer)
-    st.rerun()
+        st.info("Please sign in again to use Helping Bot."); return
+    rows = list_helping_bot_messages(user_id); history = H(rows)
+    c1, c2, c3 = st.columns([4,1,1])
+    with c1: temperature = st.slider("Response temperature", 0.0, 1.0, 0.25, 0.05, key="helping_bot_temperature")
+    with c2:
+        st.write("")
+        if st.button("New chat", use_container_width=True):
+            if start_helping_bot_chat(user_id): st.rerun()
+            else: st.error("New chat could not be started.")
+    with c3:
+        st.write("")
+        if st.button("Clear history", use_container_width=True):
+            if clear_helping_bot_history(user_id): st.rerun()
+            else: st.error("History could not be cleared.")
+    with st.expander("Memory and context"):
+        st.write(f"{sum(x.get('content') != NEW_CHAT_MARKER for x in rows)} messages are permanently saved in Supabase. This chat has {len(history)} active messages.")
+        st.caption("New chat keeps old chats saved but gives the AI fresh context. Weather uses WEATHERMAP_API_KEY.")
+    for x in history:
+        with st.chat_message(x["role"]): st.write(x["content"])
+    question = st.chat_input("Ask about Python, weather, or your internship...")
+    if question:
+        with st.chat_message("user"): st.write(question)
+        save_helping_bot_message(user_id, "user", question)
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                answer = W(question) if any(k in question.lower() for k in ("weather","temperature","forecast","humidity","rain")) else A(question, history, temperature)
+            st.write(answer)
+        save_helping_bot_message(user_id, "assistant", answer); st.rerun()
