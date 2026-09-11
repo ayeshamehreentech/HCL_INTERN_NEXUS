@@ -16,6 +16,63 @@ from ai.config import get_groq_api_key, get_groq_model
 from database.connection import get_connection
 
 
+JOURNEY_WORLDS = [
+    ("Input & Output", "Airport Boarding", "Learn to receive and display information."),
+    ("Variables", "Shopping Cart", "Store and update useful values."),
+    ("Conditions", "Castle Gate", "Make decisions using if, elif, and else."),
+    ("Loops", "Fuel Station", "Repeat a useful action safely."),
+    ("Lists", "Treasure Chest", "Collect and organize items."),
+    ("Functions", "Robot Repair", "Build reusable helpers."),
+    ("OOP", "AI Lab", "Model objects and their behaviour."),
+    ("Advanced Python", "Cyber Lock", "Combine ideas to solve larger missions."),
+]
+
+
+def _scenario_for(concept: str, level: str, completed: int) -> dict[str, str]:
+    """Map a generated Python concept to a reusable story world."""
+    text = concept.lower()
+    matches = [
+        (("nested loop",), "Multi-room Castle", "Explore rooms using a loop inside a loop."),
+        (("loop", "range", "while", "iterate"), "Fuel Station", "Keep the station running one customer at a time."),
+        (("condition", "if", "boolean", "comparison", "logical"), "Castle Gate", "Open the gate only when its rules are satisfied."),
+        (("list", "tuple", "dictionary", "dict", "collection"), "Treasure Chest", "Organize the treasures you discover."),
+        (("function", "parameter", "return"), "Robot Repair", "Teach a repair robot one reusable skill."),
+        (("class", "object", "inheritance", "oop"), "AI Lab", "Program a helpful AI lab device."),
+        (("input", "print", "string", "variable", "number"), "Airport Boarding", "Help travellers through a simple check-in."),
+    ]
+    for keywords, name, story in matches:
+        if any(keyword in text for keyword in keywords):
+            return {"name": name, "story": story, "difficulty": level, "stage": str(completed + 1)}
+    return {"name": "Forest Path", "story": "Choose the next safe step on the learning trail.", "difficulty": level, "stage": str(completed + 1)}
+
+
+def _next_scenario(level: str, completed: int) -> dict[str, str]:
+    """Choose the next reusable world from durable learner progress."""
+    concept, name, story = JOURNEY_WORLDS[min(len(JOURNEY_WORLDS) - 1, completed // 3)]
+    return {"name": name, "story": story, "concept_focus": concept, "difficulty": level, "stage": str(completed + 1)}
+
+
+def _render_journey(completed: int) -> None:
+    """A compact game map that shows the learner's durable progress."""
+    unlocked = min(len(JOURNEY_WORLDS), completed // 3 + 1)
+    cards = []
+    for index, (concept, world, description) in enumerate(JOURNEY_WORLDS):
+        status = "unlocked" if index < unlocked else "locked"
+        icon = "✅" if index < unlocked - 1 else ("🗺️" if status == "unlocked" else "🔒")
+        cards.append(
+            f"<div class='quest-world {status}'><div class='quest-icon'>{icon}</div>"
+            f"<strong>{index + 1}. {concept}</strong><span>{world}</span><small>{description}</small></div>"
+        )
+    st.markdown(
+        """<style>
+        .quest-map { display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:.65rem; margin:.5rem 0 1rem; }
+        .quest-world { min-height:112px; padding:.75rem; border-radius:15px; display:flex; flex-direction:column; gap:.2rem; border:1px solid #6f4935; background:linear-gradient(145deg,#3c2218,#5c3727); color:#f9e9d4; box-shadow:0 6px 14px rgba(35,16,10,.18); }
+        .quest-world.locked { filter:saturate(.15); opacity:.62; background:#312622; }.quest-world span { color:#f0be76; font-size:.78rem; font-weight:750; }.quest-world small { color:#ead8c3; font-size:.7rem; line-height:1.25; }.quest-icon { font-size:1.1rem; }
+        </style><div class='quest-map'>""" + "".join(cards) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 class CodingLabState(TypedDict, total=False):
     action: Literal["generate", "review", "hint", "solution"]
     level: str
@@ -28,6 +85,7 @@ class CodingLabState(TypedDict, total=False):
     passed: bool
     solution: str
     error: str
+    scenario: dict[str, str]
 
 
 def _json_object(text: str) -> dict[str, Any]:
@@ -72,10 +130,12 @@ def _search_learning_context(state: CodingLabState) -> dict[str, Any]:
 
 def _generate_task(state: CodingLabState) -> dict[str, Any]:
     prior = ", ".join(state.get("previous_titles", [])[-12:]) or "none"
+    scenario = state.get("scenario", {})
     prompt = f"""You are the planning node in an adaptive Python Coding Lab.
 Create one fresh {state.get('level', 'Beginner')} Python challenge for a learner who has completed {state.get('completed_count', 0)} verified challenges.
 Do not repeat these previous titles: {prior}.
 The task must be small, practical, solvable without external packages, and teach one clear idea.
+Frame the mission as the reusable scenario '{scenario.get('name', 'Forest Path')}'. Story direction: {scenario.get('story', '')}. Focus first on {scenario.get('concept_focus', 'a suitable Python concept')}.
 Use this optional research context only to choose an appropriate concept: {state.get('research', '')}.
 Return JSON only with title, prompt, concept, requirements (array of 2-4 strings), and starter_code.
 Do not include a solution, tests, answer, or markdown fences."""
@@ -91,6 +151,7 @@ Do not include a solution, tests, answer, or markdown fences."""
         "requirements": [str(item).strip() for item in payload["requirements"][:4]],
         "starter_code": str(payload.get("starter_code", "")),
         "category": state.get("level", "Beginner"),
+        "scenario": scenario,
     }}
 
 
@@ -245,6 +306,8 @@ def render_coding_lab() -> None:
     bonus.metric("Progress points", f"{completed} ⭐")
     st.markdown("**Coin progress — each verified answer fills one step**")
     coin_progress = st.progress(progress_in_coin_cycle / 3, text=f"{progress_in_coin_cycle}/3 correct answers toward your next 🪙 answer coin")
+    st.markdown("### Your Python Quest Map")
+    _render_journey(completed)
 
     level = st.selectbox("Choose your current level", ["Beginner", "Intermediate", "Advanced"], key="coding_lab_level")
     session_key = f"coding_lab_task_{user_id}"
@@ -254,7 +317,8 @@ def render_coding_lab() -> None:
     if st.button("✨ Create my next AI challenge", type="primary"):
         with st.spinner("The LangGraph planner is researching and creating a challenge…"):
             try:
-                result = run_coding_agent("generate", level=level, completed_count=completed, previous_titles=st.session_state.get(history_key, []))
+                scenario = _next_scenario(level, completed)
+                result = run_coding_agent("generate", level=level, completed_count=completed, previous_titles=st.session_state.get(history_key, []), scenario=scenario)
                 if result.get("task"):
                     st.session_state[session_key] = result["task"]
                     st.session_state[history_key] = (st.session_state.get(history_key, []) + [result["task"]["title"]])[-30:]
@@ -270,6 +334,8 @@ def render_coding_lab() -> None:
         return
 
     st.subheader(task["title"])
+    scenario = task.get("scenario") or _scenario_for(task.get("concept", ""), task.get("category", level), completed)
+    st.info(f"🎮 **Mission world: {scenario.get('name', 'Forest Path')}** — {scenario.get('story', 'Build your Python skill one step at a time.')}")
     st.write(task["prompt"])
     st.caption(f"Concept: {task['concept']}")
     st.markdown("**Success criteria**")
