@@ -1,0 +1,13 @@
+services:
+  app:
+    build:
+      context: .
+    image: hcl-intern-nexus:latest
+    env_file:
+      - .env
+    environment:
+      PORT: "8501"
+    ports:
+      - "${HOST_PORT:-8501}:8501"
+    init: true
+    restart: unless-stopped
