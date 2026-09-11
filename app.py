@@ -20,7 +20,7 @@ from dashboards.admin.dashboard import render_admin_dashboard
 init_db()
 
 st.set_page_config(
-    page_title="HCLTech GenAI Forge",
+    page_title="InternNexus",
     page_icon="✦",
     layout="wide"
 )
@@ -130,7 +130,7 @@ def stop_activity():
 # ============================================================
 
 def apply_aesthetic_theme():
-    """Apply the warm academic palette throughout the portal."""
+    """Apply an accessible beige/light and dark-brown portal theme."""
 
     st.markdown(
         """
@@ -175,6 +175,23 @@ def apply_aesthetic_theme():
         .quote-source { margin-top:.35rem; color:#85877c; font-size:.68rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
         .forge-banner { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1.05rem 1.25rem; margin:0 0 1.2rem; border:1px solid #d8c5b3; border-radius:16px; background:linear-gradient(100deg,#fffdf9,#eee5d7); box-shadow:0 8px 18px rgba(68,67,69,.05); }
         .forge-banner strong { display:block; color:#444345; font-size:1rem; letter-spacing:-.015em; }.forge-banner span { color:#74746e; font-size:.82rem; }.forge-badge { background:#d3b67f; color:#49453f!important; border-radius:999px; padding:.28rem .58rem; white-space:nowrap; font-size:.68rem!important; font-weight:800; letter-spacing:.06em; }
+        /* Streamlit's theme preference and OS dark preference use the same warm palette. */
+        @media (prefers-color-scheme: dark) {
+          :root { color-scheme:dark; }
+          .stApp, [data-testid="stAppViewContainer"] { background:radial-gradient(circle at 94% 0%,#5a3422 0,transparent 28%),linear-gradient(145deg,#180c08 0%,#25130d 48%,#342016 100%)!important; color:#f4e4d1!important; }
+          [data-testid="stSidebar"] { background:linear-gradient(180deg,#1b0d09 0%,#4b2c1e 100%)!important; }
+          [data-testid="stMainBlockContainer"] label, [data-testid="stMainBlockContainer"] label p, [data-testid="stMainBlockContainer"] [data-testid="stWidgetLabel"] p, h1,h2,h3 { color:#f4e4d1!important; }
+          [data-testid="stMainBlockContainer"] input, [data-testid="stMainBlockContainer"] textarea, .stTextInput input, .stTextArea textarea, [data-baseweb="select"] > div { background:#2b1710!important; color:#f7e3c9!important; border-color:#79523c!important; }
+          [data-testid="stMainBlockContainer"] input::placeholder, [data-testid="stMainBlockContainer"] textarea::placeholder { color:#cba98b!important; }
+          [data-testid="stMetric"], .quote-window, .forge-banner, [data-testid="stExpander"] { background:#2b1710!important; border-color:#694632!important; box-shadow:0 8px 18px rgba(0,0,0,.28)!important; }
+          [data-testid="stMetricLabel"], .quote-source, .forge-banner span { color:#dcc1a4!important; }
+          [data-testid="stMetricValue"], .quote-copy, .forge-banner strong { color:#f4e4d1!important; }
+          [data-baseweb="tab-list"] { border-color:#694632!important; }
+          [data-baseweb="tab"], [data-baseweb="tab"] p { color:#dcc1a4!important; }
+          [data-baseweb="tab"][aria-selected="true"], [data-baseweb="tab"][aria-selected="true"] p { color:#f4e4d1!important; }
+          .stAlert { background:#342016!important; border-color:#79523c!important; color:#f4e4d1!important; }
+        }
+        html[data-theme="dark"] .stApp, body[data-theme="dark"] .stApp { background:#1d0e09!important; color:#f4e4d1!important; }
         @keyframes quote-slide { from { transform:translateX(0); } to { transform:translateX(-50%); } }
         </style>
         """,
@@ -186,7 +203,7 @@ def quote_carousel():
     """A lightweight, auto-sliding quote strip; pause it by hovering."""
 
     quotes = [
-        ("The art of the possible begins with a question.", "HCLTech GenAI Forge"),
+        ("The art of the possible begins with a question.", "InternNexus"),
         ("Build with curiosity. Explain with clarity. Deliver with impact.", "GenAI internship principle"),
         ("Every prototype is a chance to learn something real.", "Learning mindset"),
     ]
@@ -202,10 +219,10 @@ def quote_carousel():
 
 def auth_screen():
 
-    st.title("✦ HCLTech GenAI Forge")
+    st.title("✦ InternNexus")
 
     st.caption(
-        "GenAI Internship Experience"
+        "AI-Powered Intern Management Platform · Developed during my internship at HCLTech."
     )
 
     quote_carousel()
@@ -418,7 +435,7 @@ def main():
         return
 
     st.markdown(
-        '<div class="forge-banner"><div><strong>HCLTech GenAI Forge</strong><span>Internship dashboard · Learn, build and demonstrate impact.</span></div><div class="forge-badge">DEMO WORKSPACE</div></div>',
+        '<div class="forge-banner"><div><strong>InternNexus</strong><span>AI-Powered Intern Management Platform · Developed during my internship at HCLTech.</span></div><div class="forge-badge">HCLTECH INTERNSHIP</div></div>',
         unsafe_allow_html=True,
     )
 
