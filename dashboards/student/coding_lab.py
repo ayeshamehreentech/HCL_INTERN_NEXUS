@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 from functools import lru_cache
 from typing import Any, Literal, TypedDict
+from urllib.parse import quote_plus
 from uuid import uuid4
 
 import streamlit as st
@@ -169,10 +170,40 @@ def _count_completed(user_id: int) -> int:
 def _count_unlocks(user_id: int) -> int:
     conn = get_connection()
     try:
-        row = conn.execute("SELECT COUNT(*) AS total FROM coding_lab_attempts WHERE user_id = ? AND feedback = ?", (user_id, "solution_unlock")).fetchone()
-        return int(row["total"]) if row else 0
+        row = conn.execute("SELECT COUNT(*) AS count FROM coding_lab_attempts WHERE user_id = ? AND feedback = ?", (user_id, "solution_unlock")).fetchone()
+        return int(row["count"]) if row else 0
     finally:
         conn.close()
+
+
+def _is_task_completed(user_id: int, question_key: str) -> bool:
+    """A challenge can award progress only once, even after repeated checks."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS count FROM coding_lab_attempts WHERE user_id = ? AND question_key = ? AND passed = 1",
+            (user_id, question_key),
+        ).fetchone()
+        return bool(row and int(row["count"]))
+    finally:
+        conn.close()
+
+
+def _render_learn_first(task: dict[str, Any]) -> bool:
+    """Give every learner a no-cost learning route before they attempt a task."""
+    concept = str(task.get("concept", "Python basics"))
+    query = quote_plus(f"Python {concept}")
+    st.markdown("### Learn this before you code")
+    st.write(f"You do not need prior knowledge. Spend a few minutes learning **{concept}**, then return and try the challenge.")
+    resource_columns = st.columns(3)
+    with resource_columns[0]:
+        st.link_button("IBM SkillsBuild · free learning", "https://skillsbuild.org/", use_container_width=True)
+    with resource_columns[1]:
+        st.link_button("Cisco Networking Academy · free courses", "https://www.netacad.com/courses", use_container_width=True)
+    with resource_columns[2]:
+        st.link_button("Python docs · topic guide", f"https://docs.python.org/3/search.html?q={query}", use_container_width=True)
+    st.caption("These are focused learning sources, not answers. Read one source, then use the coach and hints if you are stuck.")
+    return st.checkbox("I reviewed a learning resource and I am ready to try this task", key=f"coding_lab_ready_{task['key']}")
 
 
 def _save_attempt(user_id: int, task: dict[str, Any], code: str, passed: bool, feedback: str) -> None:
@@ -206,10 +237,14 @@ def render_coding_lab() -> None:
 
     completed = _count_completed(user_id)
     coins = max(0, completed // 3 - _count_unlocks(user_id))
-    left, middle, right = st.columns(3)
+    progress_in_coin_cycle = completed % 3
+    left, middle, right, bonus = st.columns(4)
     left.metric("Verified challenges", completed)
-    middle.metric("Answer coins", coins)
-    right.metric("Next coin in", 3 - (completed % 3) if completed % 3 else 3)
+    middle.metric("Answer coins", f"🪙 {coins}")
+    right.metric("Next coin in", 3 - progress_in_coin_cycle if progress_in_coin_cycle else 3)
+    bonus.metric("Progress points", f"{completed} ⭐")
+    st.markdown("**Coin progress — each verified answer fills one step**")
+    coin_progress = st.progress(progress_in_coin_cycle / 3, text=f"{progress_in_coin_cycle}/3 correct answers toward your next 🪙 answer coin")
 
     level = st.selectbox("Choose your current level", ["Beginner", "Intermediate", "Advanced"], key="coding_lab_level")
     session_key = f"coding_lab_task_{user_id}"
@@ -241,10 +276,16 @@ def render_coding_lab() -> None:
     for requirement in task["requirements"]:
         st.markdown(f"- {requirement}")
 
+    if not _render_learn_first(task):
+        st.info("Start with one free learning resource above. When you are ready, tick the box to open your coding workspace.")
+        return
+
     code = st.text_area("Write your Python attempt", value=task.get("starter_code", ""), height=260, key=f"coding_lab_code_{task['key']}")
     check, hint, answer = st.columns(3)
     if check.button("Check my logic"):
-        if not code.strip():
+        if _is_task_completed(user_id, task["key"]):
+            st.info("You already earned this task's progress point. Create a fresh challenge for the next point.")
+        elif not code.strip():
             st.warning("Write an attempt first. The tutor will coach your first step.")
         else:
             with st.spinner("The review node is checking your logic…"):
@@ -253,7 +294,18 @@ def render_coding_lab() -> None:
                     passed = bool(result.get("passed", False))
                     feedback = result.get("feedback", "No review was returned.")
                     _save_attempt(user_id, task, code, passed, feedback)
-                    st.success("Verified! This challenge counts toward your next answer coin.") if passed else st.info(feedback)
+                    if passed:
+                        next_completed = completed + 1
+                        st.success("Correct answer verified! +1 progress point added to your coin bar.")
+                        if next_completed % 3 == 0:
+                            coin_progress.progress(1.0, text="3/3 correct answers — 🪙 answer coin earned!")
+                            st.balloons()
+                            st.success("🪙 Coin earned! Use it only when you truly need a reference answer.")
+                        else:
+                            coin_progress.progress((next_completed % 3) / 3, text=f"{next_completed % 3}/3 correct answers toward your next 🪙 answer coin")
+                            st.info(f"{next_completed % 3}/3 correct answers toward your next answer coin.")
+                    else:
+                        st.info(feedback)
                 except Exception:
                     st.error("The review node is temporarily unavailable. Your work has not been marked.")
 
@@ -275,7 +327,7 @@ def render_coding_lab() -> None:
                 st.error("The answer node is temporarily unavailable. Your coin was not used.")
 
     if coins < 1:
-        st.caption("Earn one answer coin after every three verified, distinct challenges.")
+        st.caption("Earn one answer coin after every three verified, distinct challenges. Coins are not required for hints.")
     unlocked = st.session_state.get(f"coding_lab_answer_{user_id}")
     if unlocked:
         st.markdown("### Unlocked reference answer")
