@@ -578,13 +578,12 @@ def render_coding_lab() -> None:
     task = st.session_state.get(session_key)
 
     if not task:
-        if _render_pre_level_tutorial(stage):
+        st.caption("Open a glowing map level above to read its in-game concept card and try its tiny example. When you are ready, begin the current personal mission below.")
+        if st.button("▶ Begin current coding mission", type="primary", key="pyquest_begin_mission_" + stage["key"]):
             try:
                 _start_stage_quest(user_id, stage, completed, session_key, history_key)
             except Exception:
                 st.error("The AI tutor is temporarily unavailable. Please try again shortly.")
-        else:
-            st.info("Read each story lesson, then the Start Level button will unlock your first AI-generated mission.")
         return
 
     remediation_key = "pyquest_remediation_{}_{}".format(user_id, stage["key"])
