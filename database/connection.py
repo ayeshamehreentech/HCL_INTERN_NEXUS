@@ -1,4 +1,4 @@
-"""Durable Supabase Data API adapter with SQLite-compatible query helpers."""
+"""Supabase Data API adapter for the HCL Intern Nexus portal."""
 import os
 import re
 from supabase import create_client
@@ -76,11 +76,15 @@ def _where(rows, sql, parameters):
             elif lower_literal:
                 key, value = lower_literal.group(1), lower_literal.group(2); rules.append(lambda row, k=key, v=value: str(row.get(k, "")).lower() == v.lower())
             elif equal:
-                key, value = equal.group(1), next(values); rules.append(lambda row, k=key, v=value: row.get(k) == v)
+                key, value = equal.group(1), next(values)
+                rules.append(lambda row, k=key, v=value: row.get(k) == v)
             elif literal:
-                key, value = literal.group(1), literal.group(2).strip("'"); value = int(value) if value in ("0", "1") else value; rules.append(lambda row, k=key, v=value: row.get(k) == v)
+                key, value = literal.group(1), literal.group(2).strip("'")
+                value = int(value) if value in ("0", "1") else value
+                rules.append(lambda row, k=key, v=value: row.get(k) == v)
             elif null:
-                key = null.group(1); rules.append(lambda row, k=key: row.get(k) is None)
+                key = null.group(1)
+                rules.append(lambda row, k=key: row.get(k) is None)
         tests.append(rules)
     return [row for row in rows if any(all(rule(row) for rule in group) for group in tests)]
 
@@ -111,7 +115,8 @@ class Cursor:
                 self.rows = [{"count": len(rows)}]
             else:
                 order = re.search(r"ORDER BY\s+(\w+)(?:\s+(DESC|ASC))?", sql, re.I)
-                if order: rows.sort(key=lambda row: str(row.get(order.group(1), "")), reverse=(order.group(2) or "").upper() == "DESC")
+                if order:
+                    rows.sort(key=lambda row: str(row.get(order.group(1), "")), reverse=(order.group(2) or "").upper() == "DESC")
                 limit = re.search(r"LIMIT\s+(\d+)", sql, re.I)
                 parameter_limit = re.search(r"LIMIT\s+%s", sql, re.I)
                 if limit:
@@ -128,7 +133,8 @@ class Cursor:
             record = {key: _value(token, values) for key, token in zip(columns, match.group(2).split(","))}
             conflict = re.search(r"ON CONFLICT\s*\(([^)]+)\)", sql, re.I)
             response = self.client.table(table).upsert(record, on_conflict=conflict.group(1) if conflict else None).execute() if conflict else self.client.table(table).insert(record).execute()
-            data = response.data or []; self.lastrowid = data[0].get("id") if data else None
+            data = response.data or []
+            self.lastrowid = data[0].get("id") if data else None
             return self
         if upper.startswith("UPDATE"):
             set_match = re.search(r"SET\s+(.+?)\s+WHERE", sql, re.I)
@@ -158,17 +164,31 @@ class Cursor:
             return self
         raise ValueError("Unsupported database query")
 
-    def fetchone(self): return self.rows[0] if self.rows else None
-    def fetchall(self): return self.rows
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
+    def fetchall(self):
+        return self.rows
 
 
 class Connection:
-    def __init__(self): self.client = _client()
-    def cursor(self): return Cursor(self.client)
-    def execute(self, statement, parameters=None): return self.cursor().execute(statement, parameters)
-    def commit(self): pass
-    def rollback(self): pass
-    def close(self): pass
+    def __init__(self):
+        self.client = _client()
+
+    def cursor(self):
+        return Cursor(self.client)
+
+    def execute(self, statement, parameters=None):
+        return self.cursor().execute(statement, parameters)
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
 
 
 def get_connection(): return Connection()

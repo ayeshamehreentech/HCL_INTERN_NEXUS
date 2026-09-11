@@ -308,13 +308,13 @@ def render_students_preview():
                 ).fetchall()
                 conn.close()
                 metric_col, plan_col = st.columns(2)
-                metric_col.metric("Learning sessions", activity["sessions"])
-                plan_col.metric("Plans created", plans["count"])
-                st.progress(min(1.0, activity["seconds"] / 36000), text="Activity progress")
+                metric_col.metric("Learning sessions", activity["sessions"] if activity and "sessions" in activity.keys() else 0)
+                plan_col.metric("Plans created", plans.get("count", 0) if plans else 0)
+                st.progress(min(1.0, (activity["seconds"] if activity and "seconds" in activity.keys() else 0) / 36000), text="Activity progress")
                 if activity_by_day:
                     st.caption("Activity over the last seven active days")
                     st.bar_chart(
-                        {row["day"]: row["seconds"] for row in reversed(activity_by_day)},
+                        {row.get("day", str(row.get("started_at", ""))[:10]): row.get("seconds", 0) for row in reversed(activity_by_day)},
                         y_label="Seconds",
                     )
 

@@ -1,74 +1,68 @@
 # HCL Intern Nexus
 
-HCL Intern Nexus is a Streamlit internship learning portal with separate student, mentor, and administrator workspaces. It stores shared portal data in Supabase, so accounts, notices, doubts, meetings, resources, learning plans, and coding progress survive Streamlit Cloud restarts.
+**InternNexus** is an AI-powered internship management and learning platform developed during an HCLTech internship. It provides separate student, mentor, and administrator workspaces in a single Streamlit application.
 
-## What is included
+All shared portal data is stored in **Supabase PostgreSQL** through the Supabase Data API. The app does not use a local SQLite database, so accounts, notices, resources, doubts, meetings, plans, coding attempts, and Helping Bot history survive Streamlit Cloud restarts.
 
-- Student dashboard with notices, 24/7 mentor doubt text box, learning plan, meetings, resources, Formula Vault, Helping Bot, and a continuous Python Coding Lab.
-- Mentor dashboard for student-specific meetings, private doubt replies, notices, resources, reports, and progress.
-- Administrator dashboard for users, notices, and pending account-deletion requests.
-- Focused Resources tab: normal YouTube lessons only (no Shorts), an in-app embedded player, playlist loading, horizontal lesson carousel, mentor suggestions, saved lessons, and persistent completion state.
-- YouTube Data API search and playlist metadata when `YOUTUBE_API_KEY` is configured. DuckDuckGo is retained as a safe fallback.
-- Deep-agent-inspired learning loops: the Resource workflow plans a query, detects language, filters/ranks results, and tracks learning state; the Coding Lab guides students through plan → write → check → hint → improve → next question. The practice sequence continues beyond 50 questions.
+## Core capabilities
 
-## Portal flow
+- Student, mentor, and administrator account workflows
+- Permanent notices, private doubts, mentor learning resources, and account-deletion requests
+- Mentor meeting scheduling and recurring Tuesday/Thursday meetings
+- In-app YouTube learning: search, playlist loading, filtered regular tutorials, horizontal carousel, embedded `youtube-nocookie` player, saved items and completion state
+- Mentor resources are visible in the student's **Mentor Suggested** section
+- Python Quest Coding Lab: staged scenario worlds, learning-first links, attempts, completion progress, and coins earned after verified answers
+- Helping Bot with per-student permanent chat history, persona preferences, working memory and summary memory
+- LangChain/LangGraph-oriented deep-agent utilities for Coding Lab and HCL content workflows, with safe fallbacks when an AI provider is unavailable
+- Responsive brown/beige light and dark visual theme
+
+## Architecture
 
 ```mermaid
 flowchart LR
-  S[Student] --> D[Student dashboard]
-  M[Mentor] --> MD[Mentor dashboard]
-  A[Administrator] --> AD[Admin dashboard]
-  D --> R[Resources]
-  R --> Q[Topic and language detection]
-  Q --> Y[YouTube Data API]
-  Q --> DDG[DuckDuckGo fallback]
-  Y --> F[Filter normal tutorials and rank]
-  DDG --> F
-  F --> C[In-app video carousel and player]
-  C --> P[Supabase progress, saved state, completion]
-  MD --> MR[Mentor resource or notice]
-  MR --> DB[(Supabase)]
-  DB --> D
-  D --> CL[Coding Lab: plan, code, feedback, improve]
-  D --> DM[Private doubt message]
-  DM --> MD
-  D --> DR[Deletion request]
-  DR --> AD
+    U[Student / Mentor / Admin] --> S[Streamlit UI]
+    S --> A[LangChain + LangGraph helpers]
+    S --> Y[YouTube Data API]
+    A --> G[Groq model when configured]
+    S --> P[Supabase Data API]
+    P --> DB[(Supabase PostgreSQL)]
 ```
 
-## Persistent Supabase database
+### Resource learning flow
 
-This release does **not** use SQLite. The database adapter uses the Supabase Data API and needs these two Streamlit secrets:
+```mermaid
+flowchart LR
+    Q[Student topic] --> D[Discover regular tutorials]
+    D --> F[Remove Shorts and duplicate IDs]
+    F --> C[Horizontal video carousel]
+    C --> E[Embedded player in InternNexus]
+    E --> R[Save / completion state in Supabase]
+    M[Mentor resource] --> P[Supabase resources]
+    P --> MS[Mentor Suggested for student]
+```
+
+## Supabase setup
+
+1. In the Supabase dashboard, open **SQL Editor**.
+2. Run [`database/schema.sql`](database/schema.sql).
+3. Also run [`database/helping_bot_schema.sql`](database/helping_bot_schema.sql) for permanent Helping Bot profiles and memory snapshots.
+4. In Streamlit Cloud, configure secrets using your own rotated values:
 
 ```toml
 SUPABASE_URL = "https://your-project.supabase.co"
-SUPABASE_SECRET_KEY = "your-server-side-supabase-secret-key"
-```
-
-Before the first deployment, open **Supabase Dashboard → SQL Editor**, paste the contents of [`database/schema.sql`](database/schema.sql), and run it once. The script is safe to run again. It creates all required permanent tables, including users, activity, meetings, notices, resources, video state, private messages, coding attempts, and deletion requests.
-
-Do not use a browser/public Supabase key for `SUPABASE_SECRET_KEY`, and never commit any secret to GitHub.
-
-## Streamlit Cloud secrets
-
-In Streamlit Community Cloud, open **App settings → Secrets** and add the following values (substitute your own; never put real keys in the repository):
-
-```toml
-SUPABASE_URL = "https://your-project.supabase.co"
-SUPABASE_SECRET_KEY = "your-server-side-supabase-secret-key"
-YOUTUBE_API_KEY = "your-youtube-data-api-v3-key"
-GROQ_API_KEY = "your-groq-key"
-GROQ_MODEL = "openai/gpt-oss-120b"
-GROQ_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
-WEATHERMAP_API_KEY = "your-weather-key"
+SUPABASE_SECRET_KEY = "your-server-side-secret-key"
+YOUTUBE_API_KEY = "your-youtube-data-api-key"
+GROQ_API_KEY = "optional"
+GROQ_MODEL = "optional-model-name"
+WEATHERMAP_API_KEY = "optional"
 MENTOR_EMAIL = "mentor@example.com"
-TEAMS_MEETING_LINK = "https://teams.microsoft.com/your-meeting"
+TEAMS_MEETING_LINK = "https://teams.microsoft.com/..."
 INTERNSHIP_TITLE = "Gen AI Internship"
 ```
 
-`YOUTUBE_API_KEY` enables reliable search cards and playlist titles/thumbnails. It must have **YouTube Data API v3** enabled in Google Cloud. If it is unavailable or quota-limited, Resources falls back to DuckDuckGo instead of crashing.
+Never commit secrets, database passwords, or API keys. Rotate any value that has been displayed in a chat, image, terminal log, or commit history.
 
-## Local run
+## Run locally
 
 ```powershell
 git clone https://github.com/ayeshamehreentech/HCL_INTERN_NEXUS.git
@@ -79,20 +73,24 @@ python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Deployment checklist
+Add the required variables to `.streamlit/secrets.toml` locally. Do not add that file to Git.
 
-1. Run `database/schema.sql` in the target Supabase project once.
-2. Set the Streamlit secrets above.
-3. Deploy branch `main` with `app.py` as the entry point.
-4. Reboot the Streamlit app after saving secrets.
+## Streamlit Cloud deployment checklist
 
-## Validation
+1. Push the merged `main` branch to GitHub.
+2. Confirm the app points at that repository and branch.
+3. Add the secrets listed above in **App settings → Secrets**.
+4. Reboot the app after changing secrets or schema.
+5. If Supabase reports a missing table or column, re-run both schema files in the SQL Editor.
 
-```powershell
-py -3.13 -m py_compile app.py authentication.py database\connection.py
-py -3.13 -m py_compile dashboards\student\dashboard.py dashboards\student\resources.py dashboards\student\coding_lab.py
-```
+## Validation checklist
+
+- Create a student account and confirm it remains available after a reboot.
+- Create a notice, resource, doubt, and meeting as mentor; verify the student sees each item.
+- Search a video topic and play a result inside the Resources tab.
+- Complete a Python Quest task and verify progress/coin state updates.
+- Send a Helping Bot message, reload the application, and confirm history remains.
 
 ## Security
 
-Keys disclosed in chat, images, logs, or a commit should be rotated immediately. Use only the rotated values in Streamlit secrets; never add them to `.env`, source code, or the README.
+Keep privileged Supabase keys only in Streamlit secrets. Use the least-privileged key compatible with your Row Level Security policy, and restrict any browser-exposed API keys in their provider dashboard.

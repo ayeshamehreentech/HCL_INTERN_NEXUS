@@ -4,10 +4,7 @@ from html import escape
 import streamlit as st
 
 from database.users import get_user
-from database.admin import (
-    request_deletion,
-    list_notices
-)
+from database.admin import list_notices
 from ai.chains import MiddlewareTrace, run_middleware_step
 from database.messages import count_unread_messages
 from dashboards.shared_messages import render_student_messages
@@ -264,28 +261,3 @@ def render_student_dashboard():
 
     with st.expander("View student dashboard middleware trace"):
         st.json(student_trace.events)
-
-
-    # ========================================================
-    # ACCOUNT MANAGEMENT
-    # ========================================================
-
-    st.divider()
-
-    st.subheader(
-        "Account"
-    )
-
-
-    if st.button(
-        "Request Account Deletion"
-    ):
-
-        request_deletion(
-            st.session_state.user_id
-        )
-
-        st.warning(
-            "Your deletion request has been "
-            "sent to the administrator."
-        )

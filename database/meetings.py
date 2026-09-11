@@ -1,228 +1,56 @@
+"""Supabase persistence for student and mentor meetings."""
 from datetime import datetime
-
 from .connection import get_connection
 
 
-# ============================================================
-# SCHEDULE MEETING
-# ============================================================
-
-def save_meeting(
-    student_id,
-    mentor_id,
-    title,
-    meeting_date,
-    meeting_time,
-    meeting_link=""
-):
-    """Create a scheduled meeting."""
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        INSERT INTO meetings
-        (
-            student_id,
-            mentor_id,
-            title,
-            meeting_date,
-            meeting_time,
-            meeting_link,
-            status,
-            created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?)
-        """,
-        (
-            student_id,
-            mentor_id,
-            title,
-            meeting_date,
-            meeting_time,
-            meeting_link,
-            datetime.now().isoformat()
-        )
-    )
-
-    conn.commit()
-
-    meeting_id = cursor.lastrowid
-
-    conn.close()
-
-    return meeting_id
+def _client():
+    return get_connection().client
 
 
-# ============================================================
-# LIST MEETINGS
-# ============================================================
+def save_meeting(student_id, mentor_id, title, meeting_date, meeting_time, meeting_link=""):
+    data = _client().table("meetings").insert({"student_id": student_id, "mentor_id": mentor_id, "title": title, "meeting_date": str(meeting_date), "meeting_time": meeting_time, "meeting_link": meeting_link, "status": "scheduled", "created_at": datetime.now().isoformat()}).execute().data or []
+    return data[0].get("id") if data else None
+
+
+def save_recurring_meetings(student_id, mentor_id, title, start_date, meeting_time, meeting_link, occurrences=12):
+    from datetime import timedelta
+    day = start_date
+    while day.weekday() not in (1, 3):
+        day += timedelta(days=1)
+    ids = []
+    while len(ids) < occurrences:
+        ids.append(save_meeting(student_id, mentor_id, title, day, meeting_time, meeting_link))
+        day += timedelta(days=2 if day.weekday() == 1 else 5)
+    return ids
+
 
 def list_meetings(user_id, role="student"):
-    """Get meetings belonging to a student or mentor."""
+    column = "mentor_id" if role == "mentor" else "student_id"
+    return _client().table("meetings").select("*").eq(column, user_id).order("meeting_date").execute().data or []
 
-    conn = get_connection()
-    cursor = conn.cursor()
 
-    if role == "mentor":
-
-        cursor.execute(
-            """
-            SELECT *
-            FROM meetings
-            WHERE mentor_id = ?
-            ORDER BY meeting_date, meeting_time
-            """,
-            (user_id,)
-        )
-
-    else:
-
-        cursor.execute(
-            """
-            SELECT *
-            FROM meetings
-            WHERE student_id = ?
-            ORDER BY meeting_date, meeting_time
-            """,
-            (user_id,)
-        )
-
-    meetings = [
-        dict(row)
-        for row in cursor.fetchall()
-    ]
-
-    conn.close()
-
-    return meetings
+def get_meeting(meeting_id):
+    rows = _client().table("meetings").select("*").eq("id", meeting_id).limit(1).execute().data or []
+    return rows[0] if rows else None
 
 
 def update_meeting(meeting_id, title, meeting_date, meeting_time, meeting_link):
-    conn = get_connection()
-    conn.execute(
-        "UPDATE meetings SET title = ?, meeting_date = ?, meeting_time = ?, "
-        "meeting_link = ? WHERE id = ?",
-        (title.strip(), meeting_date, meeting_time, meeting_link.strip(), meeting_id),
-    )
-    conn.commit()
-    conn.close()
+    _client().table("meetings").update({"title": title.strip(), "meeting_date": str(meeting_date), "meeting_time": meeting_time, "meeting_link": meeting_link.strip()}).eq("id", meeting_id).execute()
 
 
-# ============================================================
-# GET ONE MEETING
-# ============================================================
+def delete_meeting(meeting_id):
+    """Permanently remove one meeting from Supabase."""
+    _client().table("meetings").delete().eq("id", meeting_id).execute()
 
-def get_meeting(meeting_id):
-    """Get one meeting by ID."""
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        SELECT *
-        FROM meetings
-        WHERE id = ?
-        """,
-        (meeting_id,)
-    )
-
-    meeting = cursor.fetchone()
-
-    conn.close()
-
-    return dict(meeting) if meeting else None
-
-
-# ============================================================
-# MARK MEETING AS JOINED
-# ============================================================
 
 def mark_joined(meeting_id):
-    """Mark a meeting as joined."""
+    _client().table("meetings").update({"status": "joined"}).eq("id", meeting_id).execute()
 
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        UPDATE meetings
-        SET status = 'joined'
-        WHERE id = ?
-        """,
-        (meeting_id,)
-    )
-
-    conn.commit()
-
-    conn.close()
-
-
-# ============================================================
-# CANCEL MEETING
-# ============================================================
 
 def cancel_meeting(meeting_id):
-    """Cancel a meeting."""
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        UPDATE meetings
-        SET status = 'cancelled'
-        WHERE id = ?
-        """,
-        (meeting_id,)
-    )
-
-    conn.commit()
-
-    conn.close()
+    _client().table("meetings").update({"status": "cancelled"}).eq("id", meeting_id).execute()
 
 
-# ============================================================
-# SAVE MEETING TRANSCRIPTION
-# ============================================================
-
-def save_meeting_transcription(
-    user_id,
-    transcript,
-    summary
-):
-    """
-    Save a meeting transcript and its AI-generated summary.
-    """
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        INSERT INTO meeting_transcriptions
-        (
-            user_id,
-            transcript,
-            summary,
-            created_at
-        )
-        VALUES (?, ?, ?, ?)
-        """,
-        (
-            user_id,
-            transcript,
-            summary,
-            datetime.now().isoformat()
-        )
-    )
-
-    conn.commit()
-
-    transcription_id = cursor.lastrowid
-
-    conn.close()
-
-    return transcription_id
+def save_meeting_transcription(user_id, transcript, summary):
+    data = _client().table("meeting_transcriptions").insert({"user_id": user_id, "transcript": transcript, "summary": summary, "created_at": datetime.now().isoformat()}).execute().data or []
+    return data[0].get("id") if data else None
