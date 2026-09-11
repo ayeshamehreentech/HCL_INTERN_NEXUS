@@ -17,7 +17,11 @@ from langchain_groq import ChatGroq
 from langgraph.graph import END, START, StateGraph
 
 from ai.config import get_groq_api_key, get_groq_model
+from ai.pyquest_agents import PYQUEST_STAGES as CURRICULUM_STAGES
 from ai.pyquest_events import outcome_events, validated_events
+from ai.pyquest_orchestrator import coordinate_learning_turn
+from ai.pyquest_sandbox import run_student_code
+from ai.pyquest_teaching import practice_camp, remediation_plan, story_lesson
 from database.connection import get_connection
 
 
@@ -359,12 +363,26 @@ def _count_stage_completed(user_id: int, stage_key: str) -> int:
 
 
 def _current_pyquest_stage(user_id: int) -> tuple[dict[str, str], int, int]:
-    for stage in PYQUEST_STAGES:
-        progress = _count_stage_completed(user_id, stage["key"])
-        if progress < stage["need"]:
-            return stage, progress, stage["need"]
-    final = PYQUEST_STAGES[-1]
-    return final, final["need"], final["need"]
+    """Ask the deterministic Syllabus Architect for the learner's next skill."""
+    completed = _count_completed(user_id)
+    verified_by_category = {
+        curriculum_stage.key: _count_stage_completed(user_id, curriculum_stage.key)
+        for curriculum_stage in CURRICULUM_STAGES
+    }
+    plan = coordinate_learning_turn(
+        total_verified=completed,
+        verified_by_category=verified_by_category,
+    ).plan
+    selected = plan.stage
+    return {
+        "key": selected.key,
+        "title": "{} · {}".format(plan.world.title, selected.title),
+        "concept": selected.concept,
+        "scenario": selected.scenario_id,
+        "world": plan.world.title,
+        "need": selected.required_verified_answers,
+        "planner_reason": plan.reason,
+    }, plan.verified_for_stage, selected.required_verified_answers
 
 
 def _stage_scenario(stage: dict[str, str], completed: int) -> dict[str, str]:
@@ -397,6 +415,24 @@ def _is_task_completed(user_id: int, question_key: str) -> bool:
         conn.close()
 
 
+def _consecutive_stage_failures(user_id: int, stage_key: str) -> int:
+    """Read recent durable attempts so Practice Camp survives a page refresh."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT passed FROM coding_lab_attempts WHERE user_id = ? AND category = ? ORDER BY id DESC LIMIT 3",
+            (user_id, stage_key),
+        ).fetchall()
+        failures = 0
+        for row in rows:
+            if int(row["passed"]):
+                break
+            failures += 1
+        return failures
+    finally:
+        conn.close()
+
+
 def _render_learn_first(task: dict[str, Any]) -> bool:
     """Give every learner a no-cost learning route before they attempt a task."""
     concept = str(task.get("concept", "Python basics"))
@@ -412,6 +448,35 @@ def _render_learn_first(task: dict[str, Any]) -> bool:
         st.link_button("Python docs · topic guide", f"https://docs.python.org/3/search.html?q={query}", use_container_width=True)
     st.caption("These are focused learning sources, not answers. Read one source, then use the coach and hints if you are stuck.")
     return st.checkbox("I reviewed a learning resource and I am ready to try this task", key=f"coding_lab_ready_{task['key']}")
+
+
+def _render_practice_camp(user_id: int, stage_key: str) -> bool:
+    """Render the Remediation specialist's smaller, no-penalty exercise."""
+    camp = practice_camp(stage_key)
+    st.markdown("### 🏕️ {}".format(camp["title"]))
+    st.info("{} This does not remove progress or spend coins.".format(camp["mission"]))
+    code = st.text_area(
+        "Practice Camp editor",
+        value=camp["starter_code"],
+        height=190,
+        key="pyquest_camp_code_{}_{}".format(user_id, camp["stage"]),
+    )
+    if st.button("Run practice safely", type="primary", key="pyquest_camp_run_{}_{}".format(user_id, camp["stage"])):
+        signals_met = all(signal in code for signal in camp["success_signals"])
+        # The function lesson is reviewed by the dedicated tutor because the
+        # restricted beginner executor deliberately disallows definitions.
+        if camp["stage"] == "functions":
+            passed = signals_met
+            detail = "Your function structure looks ready for the next mission."
+        else:
+            outcome = run_student_code(code, inputs=("Explorer",))
+            passed = outcome.passed and signals_met
+            detail = outcome.output if outcome.passed else (outcome.error or "Practice code did not run.")
+        if passed:
+            st.success("Practice Camp complete! {}".format(detail or "You can return to your quest."))
+            return True
+        st.error("Keep the exercise small. {}".format(detail))
+    return False
 
 
 def _save_attempt(user_id: int, task: dict[str, Any], code: str, passed: bool, feedback: str) -> None:
@@ -435,35 +500,17 @@ def _student_id() -> int | None:
 
 
 def _tutorial_pages(stage_key: str) -> list[tuple[str, str, str]]:
-    """Fixed teaching scenes; AI creates missions only after foundations are shown."""
-    common = [
-        ("Your quest rule", "You never need to memorize everything. Read one small idea, see an example, then try it yourself.", "🗺️"),
-    ]
-    lessons = {
-        "print": [
-            ("Meet print()", "`print()` tells Python to show a message. It is like asking the Shopping Cart sign to speak to a shopper.", "🛒"),
-            ("Your first line", "Example: `print(\"Hello!\")`\n\nThe text goes inside quotes because it is a string.", "💬"),
-            ("Data types", "Python stores different kinds of data: text (`\"apple\"`), whole numbers (`5`), decimal numbers (`2.5`), and true/false values (`True`).", "📦"),
-            ("Comments help humans", "A comment starts with `#`. Python ignores it, but it helps you remember your plan.\n\nExample: `# greet the shopper`", "📝"),
-        ],
-        "input": [
-            ("Meet input()", "`input()` lets your program ask the user a question while it is running. The answer arrives as text.", "🎤"),
-            ("Ask, then display", "Example: `name = input(\"What is your name? \")` then `print(name)`.", "⌨️"),
-            ("Variables are labeled boxes", "`name` is a variable. It remembers the answer so you can use it later.", "📦"),
-        ],
-        "variables": [
-            ("Store information", "A variable is a name that points to a value: `item = \"apple\"`.", "🛍️"),
-            ("Use the value", "You can show it with `print(item)`. Keep names short and meaningful.", "🏷️"),
-        ],
-        "conditions": [
-            ("Make a decision", "`if` checks a rule. Your program chooses what to do when the rule is true or false.", "🏰"),
-            ("A simple gate", "Example: `if age >= 18:` followed by an indented `print(\"Gate open\")`.", "🔑"),
-        ],
-        "loops": [("Repeat safely", "A loop repeats a small action. Start with `for number in range(3):`.", "🔁")],
-        "functions": [("Build a helper", "A function gives a repeated job a name, so your program stays organized.", "🤖")],
+    """Ask the Storyteller specialist for deterministic, beginner-safe cards."""
+    icons = {
+        "print": "🛒", "input": "✈️", "variables": "🛍️", "conditions": "🏰",
+        "loops": "🔁", "functions": "🤖",
     }
-    return common + lessons.get(stage_key, [])
-
+    lesson = story_lesson(stage_key)
+    pages = [
+        (str(page["heading"]), "{}\n\nExample:\n{}\n\nRemember: {}".format(page["story"], page["example"], page["check"]), icons.get(str(lesson["stage"]), "🗺️"))
+        for page in lesson["pages"]
+    ]
+    return [("Your quest rule", "You never need to memorize everything. Read one small idea, see an example, then try it yourself.", "🗺️")] + pages
 
 def _render_pre_level_tutorial(stage: dict[str, str]) -> bool:
     pages = _tutorial_pages(stage["key"])
@@ -550,6 +597,36 @@ def render_coding_lab() -> None:
             st.info("Read each story lesson, then the Start Level button will unlock your first AI-generated mission.")
         return
 
+    remediation_key = "pyquest_remediation_{}_{}".format(user_id, stage["key"])
+    failures = _consecutive_stage_failures(user_id, stage["key"])
+    remediation = remediation_plan(stage["key"], failures)
+    if remediation["pause_quest"] and not st.session_state.get(remediation_key + "_continue"):
+        if st.session_state.get(remediation_key) == "camp":
+            if _render_practice_camp(user_id, stage["key"]):
+                st.session_state[remediation_key + "_continue"] = True
+                st.session_state.pop(remediation_key, None)
+                st.rerun()
+            st.caption("After the small camp exercise, return to the same mission with fresh confidence.")
+            return
+        st.warning(remediation["message"])
+        st.caption("Focus: {}".format(remediation.get("focus", "Try one small step at a time.")))
+        camp_col, story_col, continue_col = st.columns(3)
+        with camp_col:
+            if st.button("🏕️ Enter Practice Camp", key=remediation_key + "_camp", use_container_width=True):
+                st.session_state[remediation_key] = "camp"
+                st.rerun()
+        with story_col:
+            if st.button("📖 Review concept story", key=remediation_key + "_story", use_container_width=True):
+                st.session_state.pop(session_key, None)
+                st.session_state["pyquest_lesson_page_{}".format(stage["key"])] = 0
+                st.session_state[remediation_key + "_continue"] = True
+                st.rerun()
+        with continue_col:
+            if st.button("💪 Keep trying", key=remediation_key + "_continue_button", use_container_width=True):
+                st.session_state[remediation_key + "_continue"] = True
+                st.rerun()
+        return
+
     safe_title = html.escape(task["title"])
     st.markdown("<div style='background:linear-gradient(100deg,#063563,#0878bf);border-radius:16px;padding:1rem 1.2rem;color:#fff;margin-top:.8rem'><h3 style='color:#ffe95a;margin:0'>🏆 " + safe_title + "</h3><small>Complete this mission to earn progress toward a coin.</small></div>", unsafe_allow_html=True)
     scenario = task.get("scenario") or _stage_scenario(stage, completed)
@@ -581,6 +658,19 @@ def render_coding_lab() -> None:
         else:
             with st.spinner("The review node is checking your logic…"):
                 try:
+                    # The sandbox rejects imports, files, networking, reflection, and
+                    # unbounded constructs before the LLM reviewer sees a submission.
+                    # Function lessons keep their tutor-only review because this first
+                    # sandbox intentionally supports the beginner subset through loops.
+                    sandbox = None if stage["key"] == "functions" else run_student_code(
+                        code, inputs=("Explorer", "18", "3")
+                    )
+                    if sandbox is not None and not sandbox.passed:
+                        feedback = sandbox.error or "The safe practice runner could not execute this code."
+                        _save_attempt(user_id, task, code, False, feedback)
+                        st.session_state.pop("pyquest_remediation_{}_{}_continue".format(user_id, stage["key"]), None)
+                        st.error("Safe runner: " + feedback)
+                        st.stop()
                     result = run_coding_agent("review", task=task, code=code)
                     passed = bool(result.get("passed", False))
                     feedback = result.get("feedback", "No review was returned.")
@@ -596,6 +686,7 @@ def render_coding_lab() -> None:
                         st.rerun()
                     else:
                         scenario_id = str((task.get("scenario") or {}).get("scenario_id", stage["scenario"]))
+                        st.session_state.pop("pyquest_remediation_{}_{}_continue".format(user_id, stage["key"]), None)
                         _render_game_event_scene(scenario_id, outcome_events(scenario_id, False), coins)
                         st.info(feedback)
                 except Exception:
