@@ -10,6 +10,7 @@ load_dotenv()
 
 from authentication import login_page, signup_page, logout
 from database.connection import init_db, get_connection
+from database.admin import request_deletion
 
 from dashboards.student.dashboard import render_student_dashboard
 from dashboards.mentor.dashboard import render_mentor_dashboard
@@ -415,6 +416,13 @@ def main():
             ["Dashboard", "About HCLTech"],
             label_visibility="collapsed",
         )
+
+        if st.session_state.user_role == "student":
+            st.divider()
+            st.caption("Account")
+            if st.button("Request Account Deletion", use_container_width=True):
+                request_deletion(st.session_state.user_id)
+                st.warning("Your deletion request has been sent to the administrator.")
 
         if st.button(
             "Logout",

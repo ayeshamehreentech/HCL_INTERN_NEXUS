@@ -8,9 +8,27 @@ def S(name):
     try: return st.secrets.get(name, os.getenv(name, ""))
     except Exception: return os.getenv(name, "")
 
-def H(rows):
-    marker = max((i for i, row in enumerate(rows) if row.get("content") == NEW_CHAT_MARKER), default=-1)
-    return [row for row in rows[marker + 1:] if row.get("role") in {"user", "assistant"}]
+def conversations(rows):
+    """Split the permanent message log into chats at saved new-chat markers."""
+    chats, current, has_marker = [], [], False
+    for row in rows:
+        if row.get("content") == NEW_CHAT_MARKER:
+            if current:
+                chats.append(current)
+            current = []
+            has_marker = True
+        elif row.get("role") in {"user", "assistant"}:
+            current.append(row)
+    if current or has_marker:
+        chats.append(current)
+    return chats
+
+
+def chat_label(chat, index, newest_index):
+    first_question = next((x.get("content", "") for x in chat if x.get("role") == "user"), "Empty chat")
+    when = str(chat[-1].get("created_at", ""))[:16].replace("T", " ") if chat else "New"
+    prefix = "Current chat" if index == newest_index else f"Chat {index + 1}"
+    return f"{prefix} · {when} · {first_question[:42]}"
 
 def W(question):
     key = S("WEATHERMAP_API_KEY")
@@ -24,10 +42,13 @@ def W(question):
         return f"**{place['name']}**: {desc}, **{main['temp']} C**, feels like {main['feels_like']} C; humidity {main['humidity']}%."
     except Exception: return "I could not retrieve live weather right now. Please try again shortly."
 
-def A(question, history, temperature):
+def A(question, history, temperature, custom_instruction=""):
     key = S("GROQ_API_KEY")
     if not key: return "Your question was saved. Add GROQ_API_KEY to enable AI replies."
-    messages = [{"role":"system", "content":"You are a patient internship learning assistant. Teach simply and do not invent facts."}]
+    system = "You are a patient internship learning assistant. Teach simply and do not invent facts."
+    if custom_instruction.strip():
+        system += " Student preference: " + custom_instruction.strip()[:600]
+    messages = [{"role":"system", "content":system}]
     messages += [{"role":x["role"], "content":x["content"]} for x in history[-12:]] + [{"role":"user", "content":question}]
     try: return Groq(api_key=key).chat.completions.create(model=S("GROQ_MODEL") or "openai/gpt-oss-120b", messages=messages, temperature=temperature).choices[0].message.content.strip()
     except Exception: return "I saved your question, but the AI service is temporarily unavailable."
@@ -37,30 +58,70 @@ def render_helping_bot_tab():
     st.title("Helping Bot")
     if not user_id:
         st.info("Please sign in again to use Helping Bot."); return
-    rows = list_helping_bot_messages(user_id); history = H(rows)
-    c1, c2, c3 = st.columns([4,1,1])
-    with c1: temperature = st.slider("Response temperature", 0.0, 1.0, 0.25, 0.05, key="helping_bot_temperature")
-    with c2:
-        st.write("")
-        if st.button("New chat", use_container_width=True):
-            if start_helping_bot_chat(user_id): st.rerun()
-            else: st.error("New chat could not be started.")
-    with c3:
-        st.write("")
-        if st.button("Clear history", use_container_width=True):
-            if clear_helping_bot_history(user_id): st.rerun()
-            else: st.error("History could not be cleared.")
-    with st.expander("Memory and context"):
-        st.write(f"{sum(x.get('content') != NEW_CHAT_MARKER for x in rows)} messages are permanently saved in Supabase. This chat has {len(history)} active messages.")
-        st.caption("New chat keeps old chats saved but gives the AI fresh context. Weather uses WEATHERMAP_API_KEY.")
-    for x in history:
-        with st.chat_message(x["role"]): st.write(x["content"])
-    question = st.chat_input("Ask about Python, weather, or your internship...")
+    rows = list_helping_bot_messages(user_id)
+    chats = conversations(rows)
+    if not chats:
+        chats = [[]]
+    newest_index = len(chats) - 1
+    selected_key = "helping_bot_selected_chat"
+    if selected_key not in st.session_state or st.session_state[selected_key] >= len(chats):
+        st.session_state[selected_key] = newest_index
+
+    chat_area, panel = st.columns([3, 1], gap="large")
+    with panel:
+        st.subheader("Chat controls")
+        if st.button("＋ New chat", use_container_width=True, key="helping_bot_new_chat"):
+            if start_helping_bot_chat(user_id):
+                st.session_state.pop(selected_key, None)
+                st.rerun()
+            else:
+                st.error("New chat could not be started.")
+        labels = [chat_label(chat, i, newest_index) for i, chat in enumerate(chats)]
+        selected = st.selectbox("Chat history", range(len(chats)), format_func=lambda i: labels[i], index=st.session_state[selected_key], key="helping_bot_chat_picker")
+        st.session_state[selected_key] = selected
+        temperature = st.slider("Response temperature", 0.0, 1.0, 0.25, 0.05, key="helping_bot_temperature")
+        custom_instruction = st.text_area("Customize the bot", placeholder="Example: Explain Python with short examples.", max_chars=600, key="helping_bot_custom_instruction")
+        if st.button("Clear all history", use_container_width=True, key="helping_bot_clear_history"):
+            if clear_helping_bot_history(user_id):
+                st.session_state.pop(selected_key, None)
+                st.rerun()
+            else:
+                st.error("History could not be cleared.")
+
+        st.subheader("Memory")
+        current_chat = chats[selected]
+        working = current_chat[-6:]
+        with st.expander("Working memory", expanded=False):
+            st.caption("Temporary context sent with the next AI request (last 6 messages).")
+            if working:
+                for item in working:
+                    st.write(f"**{item['role'].title()}:** {item['content'][:160]}")
+            else: st.caption("No messages in this chat yet.")
+        with st.expander("Episodic memory", expanded=False):
+            st.caption("Past chats saved permanently in Supabase. The bot does not read these unless you open that chat.")
+            for i in range(max(0, newest_index - 5), newest_index):
+                chat = chats[i]
+                st.write(chat_label(chat, i, newest_index))
+            if len(chats) <= 1: st.caption("No earlier chats yet.")
+        with st.expander("Summary memory", expanded=False):
+            st.caption("A transparent runtime summary; it is not an invented long-term profile.")
+            st.write(f"Viewing {len(current_chat)} messages in {labels[selected].split(' · ')[0]}. {sum(len(x) for x in chats)} messages are permanently stored for this student.")
+            st.caption("Weather requests use WEATHERMAP_API_KEY. Other questions use Groq with your chosen temperature and customization.")
+
+    with chat_area:
+        st.caption("Your messages are private to your student account and permanently stored in Supabase.")
+        history = chats[selected]
+        for x in history:
+            with st.chat_message(x["role"]): st.write(x["content"])
+        if selected != newest_index:
+            st.info("You are viewing a previous chat. Choose Current chat in the right panel to continue asking questions.")
+            return
+        question = st.chat_input("Ask about Python, weather, or your internship...")
     if question:
         with st.chat_message("user"): st.write(question)
         save_helping_bot_message(user_id, "user", question)
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                answer = W(question) if any(k in question.lower() for k in ("weather","temperature","forecast","humidity","rain")) else A(question, history, temperature)
+                answer = W(question) if any(k in question.lower() for k in ("weather","temperature","forecast","humidity","rain")) else A(question, history, temperature, custom_instruction)
             st.write(answer)
         save_helping_bot_message(user_id, "assistant", answer); st.rerun()
