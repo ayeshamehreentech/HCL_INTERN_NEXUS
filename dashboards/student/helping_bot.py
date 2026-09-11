@@ -1,4 +1,4 @@
-import os, re
+import io, os, re, zipfile
 import requests
 import streamlit as st
 from groq import Groq
@@ -8,11 +8,40 @@ from database.helping_bot import (
     clear_helping_bot_history,
     is_helping_bot_internal_record,
     latest_helping_bot_memory,
+    list_helping_bot_documents,
     list_helping_bot_messages,
+    save_helping_bot_document,
     save_helping_bot_memory,
     save_helping_bot_message,
     start_helping_bot_chat,
 )
+
+MAX_RAG_UPLOAD_BYTES = 5 * 1024 * 1024
+
+
+def _extract_rag_text(uploaded_file):
+    """Extract readable, bounded text from a student document for private RAG."""
+    raw = uploaded_file.getvalue()
+    if len(raw) > MAX_RAG_UPLOAD_BYTES:
+        return "", "Files are limited to 5 MB."
+    name = str(uploaded_file.name or "document")
+    suffix = name.rsplit(".", 1)[-1].lower() if "." in name else "txt"
+    try:
+        if suffix == "pdf":
+            from pypdf import PdfReader
+            text = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(raw)).pages)
+        elif suffix == "docx":
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                xml = archive.read("word/document.xml").decode("utf-8", "ignore")
+            text = re.sub(r"<[^>]+>", " ", xml)
+        else:
+            text = raw.decode("utf-8", "ignore")
+    except Exception:
+        return "", "I could not read this file. Upload a text-based PDF, DOCX, TXT, Markdown, or CSV file."
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) < 30:
+        return "", "The file did not contain enough readable text for RAG."
+    return text[:60_000], ""
 
 def S(name):
     try: return st.secrets.get(name, os.getenv(name, ""))
@@ -52,9 +81,9 @@ def W(question):
         return f"**{place['name']}**: {desc}, **{main['temp']} C**, feels like {main['feels_like']} C; humidity {main['humidity']}%."
     except Exception: return "I could not retrieve live weather right now. Please try again shortly."
 
-def A(question, history, temperature, custom_instruction=""):
+def A(question, history, temperature, custom_instruction="", user_id=None):
     key = S("GROQ_API_KEY")
-    context, sources = retrieve_portal_context(question)
+    context, sources = retrieve_portal_context(question, user_id=user_id)
     if not key: return "Your question was saved. Add GROQ_API_KEY to enable AI replies.", sources
     system = "You are a patient internship learning assistant. Teach simply and do not invent facts."
     if context:
@@ -117,7 +146,14 @@ def render_helping_bot_tab():
                 st.error("History could not be cleared.")
 
         st.subheader("Memory")
-        st.caption("RAG is enabled: the bot retrieves matching permanent notices and mentor resources before it answers. It uses transparent lexical retrieval, not a hidden vector database.")
+        uploaded_documents = list_helping_bot_documents(user_id)
+        st.caption("RAG is enabled: the bot retrieves matching permanent notices, mentor resources, and your private uploaded documents before it answers. LangChain splits source text and uses a derived FAISS index when the embedding runtime is available.")
+        with st.expander("My RAG documents · {}".format(len(uploaded_documents)), expanded=False):
+            if uploaded_documents:
+                for document in uploaded_documents:
+                    st.write("- **{}** · {} characters".format(document.get("filename", "document"), len(str(document.get("text", "")))))
+            else:
+                st.caption("Use the ＋ beside the message box to add a private study document.")
         current_chat = chats[selected]
         saved_working = latest_helping_bot_memory(rows, "working") or {}
         saved_summary = latest_helping_bot_memory(rows, "summary") or {}
@@ -152,7 +188,26 @@ def render_helping_bot_tab():
         if selected != newest_index:
             st.info("You are viewing a previous chat. Choose Current chat in the right panel to continue asking questions.")
             return
-        question = st.chat_input("Ask about Python, weather, or your internship...")
+        upload_col, question_col = st.columns([0.12, 0.88])
+        with upload_col:
+            with st.popover("＋", help="Add a document to your private RAG knowledge base"):
+                st.caption("PDF, DOCX, TXT, Markdown, or CSV · up to 5 MB")
+                uploaded_file = st.file_uploader(
+                    "Choose a document",
+                    type=["pdf", "docx", "txt", "md", "csv"],
+                    key="helping_bot_rag_upload",
+                    label_visibility="collapsed",
+                )
+                if uploaded_file and st.button("Add to my RAG", key="helping_bot_rag_store", use_container_width=True):
+                    extracted_text, upload_error = _extract_rag_text(uploaded_file)
+                    if upload_error:
+                        st.error(upload_error)
+                    elif save_helping_bot_document(user_id, uploaded_file.name, uploaded_file.type, extracted_text):
+                        st.success("Saved privately. Ask a question about this document now.")
+                    else:
+                        st.error("The document could not be saved to your private RAG library.")
+        with question_col:
+            question = st.chat_input("Ask about Python, weather, your internship, or an uploaded document…")
     if question:
         with st.chat_message("user"): st.write(question)
         save_helping_bot_message(user_id, "user", question)
@@ -161,7 +216,7 @@ def render_helping_bot_tab():
                 if any(k in question.lower() for k in ("weather","temperature","forecast","humidity","rain")):
                     answer, rag_sources = W(question), []
                 else:
-                    answer, rag_sources = A(question, history, temperature, custom_instruction)
+                    answer, rag_sources = A(question, history, temperature, custom_instruction, user_id=user_id)
             st.write(answer)
             if rag_sources:
                 with st.expander("Retrieved portal sources", expanded=False):

@@ -6,6 +6,8 @@ from .connection import get_connection
 
 NEW_CHAT_MARKER = "__HCL_NEW_CHAT__"
 MEMORY_PREFIX = "__HCL_BOT_MEMORY__:"
+RAG_DOCUMENT_PREFIX = "__HCL_RAG_DOCUMENT__:"
+MAX_RAG_DOCUMENT_CHARACTERS = 60_000
 
 
 def _client():
@@ -58,6 +60,46 @@ def save_helping_bot_memory(user_id, kind, payload):
     )
 
 
+def save_helping_bot_document(user_id, filename, mime_type, text):
+    """Persist extracted text for one student's private RAG corpus.
+
+    The original binary is never written to the chat table.  Keeping extracted
+    text only makes the document searchable while avoiding accidental storage
+    of an executable or oversized attachment.
+    """
+    clean_text = str(text or "").strip()
+    clean_name = str(filename or "uploaded document").strip()[:180]
+    if not clean_text:
+        return None
+    record = {
+        "filename": clean_name,
+        "mime_type": str(mime_type or "text/plain")[:120],
+        "text": clean_text[:MAX_RAG_DOCUMENT_CHARACTERS],
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return save_helping_bot_message(
+        user_id,
+        "assistant",
+        RAG_DOCUMENT_PREFIX + json.dumps(record, ensure_ascii=False),
+    )
+
+
+def list_helping_bot_documents(user_id, limit=24):
+    """Load private, previously extracted RAG documents for a student."""
+    documents = []
+    for row in list_helping_bot_messages(user_id, limit=500):
+        content = str(row.get("content", ""))
+        if not content.startswith(RAG_DOCUMENT_PREFIX):
+            continue
+        try:
+            record = json.loads(content[len(RAG_DOCUMENT_PREFIX):])
+            if record.get("text"):
+                documents.append(record)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return documents[-limit:]
+
+
 def latest_helping_bot_memory(rows, kind):
     """Read the newest permanent record of one memory type from loaded rows."""
     for row in reversed(rows):
@@ -76,7 +118,7 @@ def latest_helping_bot_memory(rows, kind):
 def is_helping_bot_internal_record(row):
     """Hide control/memory records from the conversational transcript."""
     content = str(row.get("content", ""))
-    return content == NEW_CHAT_MARKER or content.startswith(MEMORY_PREFIX)
+    return content == NEW_CHAT_MARKER or content.startswith(MEMORY_PREFIX) or content.startswith(RAG_DOCUMENT_PREFIX)
 
 
 def clear_helping_bot_history(user_id):

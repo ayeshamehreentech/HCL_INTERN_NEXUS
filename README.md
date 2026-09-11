@@ -12,7 +12,7 @@ All shared portal data is stored in **Supabase PostgreSQL** through the Supabase
 - In-app YouTube learning: search, playlist loading, filtered regular tutorials, horizontal carousel, embedded `youtube-nocookie` player, saved items and completion state
 - Mentor resources are visible in the student's **Mentor Suggested** section
 - Python Quest Coding Lab: an interactive HTML/CSS/JavaScript Home/Map/Levels mini-game, staged scenario worlds, learn-before-code lessons, attempts, completion progress, and coins earned after verified answers
-- Helping Bot with per-student permanent chat history, persona preferences, working memory and summary memory; retrieval-augmented answers grounded in permanent notices and mentor resources
+- Helping Bot with per-student permanent chat history, persona preferences, working memory and summary memory; a `＋` document upload control stores extracted text privately in Supabase for LangChain RAG over notices, mentor resources, and the student's own files
 - PyQuest uses a validated Python event registry: LangGraph/Python selects an allowlisted event, then the embedded JavaScript runs only predefined scene animations (never AI-generated browser code)
 - LangChain/LangGraph-oriented deep-agent utilities for Coding Lab and HCL content workflows, with safe fallbacks when an AI provider is unavailable
 - Responsive brown/beige light and dark visual theme
@@ -41,6 +41,38 @@ flowchart LR
     M[Mentor resource] --> P[Supabase resources]
     P --> MS[Mentor Suggested for student]
 ```
+
+### PyQuest specialist-agent flow
+
+```mermaid
+flowchart TD
+    U[Student opens Coding Lab] --> O[PyQuest Coordinator]
+    O --> SA[Syllabus Architect]
+    SA --> ST[Storyteller Agent]
+    ST --> C[Student code attempt]
+    C --> SB[Restricted Sandbox]
+    SB --> EV[Evaluator and Reward Agent]
+    SB -->|blocked or failed| RC[Remediation and Practice Camp Agent]
+    EV --> VS[Validated Visual Sync events]
+    EV --> P[Supabase attempt and progress data]
+    RC --> ST
+```
+
+The coordinator itself does not write to the database. It gives the UI a deterministic learning decision; the portal then persists verified attempts in Supabase. The restricted sandbox supports the early teaching subset and intentionally rejects imports, file access, networking, reflection, and unbounded code. For production hostile-code execution, use a separate container service with operating-system resource limits.
+
+### Helping Bot private RAG flow
+
+```mermaid
+flowchart LR
+    F[Student selects ＋ and uploads file] --> X[Extract text only]
+    X --> P[Supabase private Helping Bot records]
+    Q[Student question] --> R[LangChain splitter + FAISS retrieval]
+    P --> R
+    N[Notices and mentor resources] --> R
+    R --> G[Grounded Groq response]
+```
+
+Uploaded files may be PDF, DOCX, TXT, Markdown, or CSV up to 5 MB. The original binary is not stored in the chat table—only extracted readable text. FAISS vectors are a derived in-process cache; the permanent source of truth is the student's Supabase record. If FastEmbed cannot initialise, the bot falls back to transparent lexical retrieval instead of failing.
 
 ## Supabase setup
 
@@ -91,6 +123,7 @@ Add the required variables to `.streamlit/secrets.toml` locally. Do not add that
 - Search a video topic and play a result inside the Resources tab.
 - Complete a Python Quest task and verify progress/coin state updates.
 - Send a Helping Bot message, reload the application, and confirm history remains.
+- Upload a private study document through the Helping Bot `＋` control; ask a question about it and confirm the retrieved source is shown.
 
 ## Security
 
