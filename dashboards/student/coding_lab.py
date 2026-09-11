@@ -52,6 +52,7 @@ PYQUEST_STAGES = [
 SCENARIO_ART = {
     "Shopping Cart": "shopping-cart-quest.png",
     "Fuel Station": "fuel-station-quest.svg",
+    "Castle Gate": "castle-gate-quest.png",
 }
 
 
