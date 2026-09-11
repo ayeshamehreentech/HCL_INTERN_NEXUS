@@ -1,8 +1,9 @@
 [theme]
-# Docker and Streamlit use the same focused dark-brown learning palette by default.
-base = "dark"
-primaryColor = "#b9825f"
-backgroundColor = "#1d0e09"
-secondaryBackgroundColor = "#382016"
-textColor = "#f4e4d1"
+# Start with the original calm light portal. Users can choose Dark in the
+# Streamlit settings menu; the in-app dark CSS then applies the brown/beige mode.
+base = "light"
+primaryColor = "#4b2e24"
+backgroundColor = "#faf6f1"
+secondaryBackgroundColor = "#eee5d7"
+textColor = "#444345"
 font = "sans serif"
