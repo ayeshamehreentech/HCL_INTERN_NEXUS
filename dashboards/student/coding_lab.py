@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import base64
+import html
 from datetime import datetime
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Literal, TypedDict
 from urllib.parse import quote_plus
 from uuid import uuid4
@@ -52,23 +55,38 @@ def _next_scenario(level: str, completed: int) -> dict[str, str]:
     return {"name": name, "story": story, "concept_focus": concept, "difficulty": level, "stage": str(completed + 1)}
 
 
+def _render_game_hud(completed: int, coins: int) -> None:
+    """Render the original Python Quest HUD above the playable map."""
+    level = max(1, completed // 6 + 1)
+    xp = min(100, (completed % 6) * 16 + 8)
+    st.markdown(
+        f"""<style>
+        .pyquest-hud {{background:linear-gradient(115deg,#042c5a,#075e9b 55%,#073d70);border:2px solid #50cfff;border-radius:22px;padding:1rem 1.25rem;color:#fff;box-shadow:0 10px 22px #001c3a55;margin:.2rem 0 .8rem}}
+        .pyquest-title {{font-size:1.65rem;font-weight:900;letter-spacing:.04em;color:#ffd44d;text-shadow:2px 2px #092148}} .pyquest-tag {{font-size:.82rem;color:#c9efff}}
+        .hud-stat {{background:#082244;border:1px solid #3fc7ff;border-radius:14px;padding:.45rem .75rem;font-weight:800;text-align:center;color:#fff}} .hud-stat b {{color:#ffd548;font-size:1.15rem}}
+        .xp-track {{height:9px;background:#081f3b;border-radius:8px;overflow:hidden;margin-top:.35rem}} .xp-fill {{height:100%;width:{xp}%;background:linear-gradient(90deg,#9cf52f,#ffe34a);border-radius:8px}}
+        </style><div class='pyquest-hud'><div style='display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap'><div><div class='pyquest-title'>🐍 PYQUEST</div><div class='pyquest-tag'>Code. Solve. Level Up.</div></div><div style='min-width:210px'><b>Level {level}</b> · {completed} verified quests<div class='xp-track'><div class='xp-fill'></div></div><small>{xp}/100 XP to the next level</small></div><div style='display:flex;gap:.5rem'><div class='hud-stat'>🪙 <b>{coins}</b><br><small>coins</small></div><div class='hud-stat'>⚡ <b>5/5</b><br><small>focus</small></div></div></div></div>""",
+        unsafe_allow_html=True,
+    )
+
+
 def _render_journey(completed: int) -> None:
-    """A compact game map that shows the learner's durable progress."""
+    """Render an illustrated map with interactive-looking, progress-aware worlds."""
     unlocked = min(len(JOURNEY_WORLDS), completed // 3 + 1)
     cards = []
     for index, (concept, world, description) in enumerate(JOURNEY_WORLDS):
         status = "unlocked" if index < unlocked else "locked"
         icon = "✅" if index < unlocked - 1 else ("🗺️" if status == "unlocked" else "🔒")
-        cards.append(
-            f"<div class='quest-world {status}'><div class='quest-icon'>{icon}</div>"
-            f"<strong>{index + 1}. {concept}</strong><span>{world}</span><small>{description}</small></div>"
-        )
+        cards.append(f"<div class='quest-world {status}'><div class='quest-icon'>{icon}</div><strong>{index + 1}. {concept}</strong><span>{world}</span><small>{description}</small></div>")
+    map_path = Path(__file__).resolve().parents[2] / "assets" / "python-quest-map.png"
+    backdrop = ""
+    if map_path.exists():
+        backdrop = "data:image/png;base64," + base64.b64encode(map_path.read_bytes()).decode("ascii")
     st.markdown(
         """<style>
-        .quest-map { display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:.65rem; margin:.5rem 0 1rem; }
-        .quest-world { min-height:112px; padding:.75rem; border-radius:15px; display:flex; flex-direction:column; gap:.2rem; border:1px solid #6f4935; background:linear-gradient(145deg,#3c2218,#5c3727); color:#f9e9d4; box-shadow:0 6px 14px rgba(35,16,10,.18); }
-        .quest-world.locked { filter:saturate(.15); opacity:.62; background:#312622; }.quest-world span { color:#f0be76; font-size:.78rem; font-weight:750; }.quest-world small { color:#ead8c3; font-size:.7rem; line-height:1.25; }.quest-icon { font-size:1.1rem; }
-        </style><div class='quest-map'>""" + "".join(cards) + "</div>",
+        .quest-map-shell {background-image:linear-gradient(#00376633,#00376633),url('""" + backdrop + """');background-size:cover;background-position:center;border-radius:22px;min-height:350px;padding:1rem;box-shadow:inset 0 0 0 2px #5ee4ff,0 12px 22px #02234b66;display:flex;align-items:flex-end}
+        .quest-map {display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:.7rem;width:100%;}.quest-world {min-height:90px;padding:.6rem;border-radius:14px;display:flex;flex-direction:column;gap:.1rem;border:2px solid #9ceaff;background:linear-gradient(160deg,#074579ee,#032851ee);color:#fff;box-shadow:0 5px 10px #001e42aa;text-shadow:1px 1px #001b38}.quest-world.unlocked:hover{transform:translateY(-3px);border-color:#ffe95a}.quest-world.locked{filter:saturate(.1);opacity:.76;background:#20384ddd}.quest-world span{color:#ffe769;font-size:.76rem;font-weight:800}.quest-world small{color:#d7f4ff;font-size:.67rem;line-height:1.15}.quest-icon{font-size:1rem}@media(max-width:800px){.quest-map{grid-template-columns:repeat(2,minmax(120px,1fr))}.quest-map-shell{min-height:440px}}
+        </style><div class='quest-map-shell'><div class='quest-map'>""" + "".join(cards) + "</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -289,8 +307,6 @@ def _student_id() -> int | None:
 
 def render_coding_lab() -> None:
     """Render an endless, adaptive Python practice loop."""
-    st.header("🧪 Coding Lab")
-    st.caption("LangGraph plans a fresh challenge, reviews your reasoning, coaches one step at a time, and never runs submitted code.")
     user_id = _student_id()
     if not user_id:
         st.info("Sign in as a student to start your personal Coding Lab.")
@@ -299,22 +315,26 @@ def render_coding_lab() -> None:
     completed = _count_completed(user_id)
     coins = max(0, completed // 3 - _count_unlocks(user_id))
     progress_in_coin_cycle = completed % 3
-    left, middle, right, bonus = st.columns(4)
-    left.metric("Verified challenges", completed)
-    middle.metric("Answer coins", f"🪙 {coins}")
-    right.metric("Next coin in", 3 - progress_in_coin_cycle if progress_in_coin_cycle else 3)
-    bonus.metric("Progress points", f"{completed} ⭐")
-    st.markdown("**Coin progress — each verified answer fills one step**")
-    coin_progress = st.progress(progress_in_coin_cycle / 3, text=f"{progress_in_coin_cycle}/3 correct answers toward your next 🪙 answer coin")
-    st.markdown("### Your Python Quest Map")
+    _render_game_hud(completed, coins)
+    st.markdown("<div style='display:flex;justify-content:space-between;align-items:center'><h3 style='margin:.25rem 0;color:#073b70'>🗺️ Your Python Quest Map</h3><span style='background:#fff0a1;padding:.35rem .75rem;border-radius:99px;color:#5a3800;font-weight:700'>Complete quests · collect coins · unlock worlds</span></div>", unsafe_allow_html=True)
     _render_journey(completed)
 
+    info, bar, next_up = st.columns([1, 3, 1])
+    with info:
+        st.metric("Verified quests", completed)
+    with bar:
+        st.markdown("**Coin progress**")
+        coin_progress = st.progress(progress_in_coin_cycle / 3, text=f"{progress_in_coin_cycle}/3 correct answers toward the next 🪙")
+    with next_up:
+        st.metric("Next coin", 3 - progress_in_coin_cycle if progress_in_coin_cycle else 3)
+
+    st.markdown("### 🎮 Mission Control")
     level = st.selectbox("Choose your current level", ["Beginner", "Intermediate", "Advanced"], key="coding_lab_level")
     session_key = f"coding_lab_task_{user_id}"
     history_key = f"coding_lab_titles_{user_id}"
     task = st.session_state.get(session_key)
 
-    if st.button("✨ Create my next AI challenge", type="primary"):
+    if st.button("✨ Start my next quest", type="primary", use_container_width=True):
         with st.spinner("The LangGraph planner is researching and creating a challenge…"):
             try:
                 scenario = _next_scenario(level, completed)
@@ -330,10 +350,11 @@ def render_coding_lab() -> None:
         return
 
     if not task:
-        st.info("Choose a level, then ask the LangGraph planner for a fresh Python challenge.")
+        st.info("Choose a level, then start a fresh AI-generated quest. Every mission teaches one small Python idea before you code.")
         return
 
-    st.subheader(task["title"])
+    safe_title = html.escape(task["title"])
+    st.markdown("<div style='background:linear-gradient(100deg,#063563,#0878bf);border-radius:16px;padding:1rem 1.2rem;color:#fff;margin-top:.8rem'><h3 style='color:#ffe95a;margin:0'>🏆 " + safe_title + "</h3><small>Complete this mission to earn progress toward a coin.</small></div>", unsafe_allow_html=True)
     scenario = task.get("scenario") or _scenario_for(task.get("concept", ""), task.get("category", level), completed)
     st.info(f"🎮 **Mission world: {scenario.get('name', 'Forest Path')}** — {scenario.get('story', 'Build your Python skill one step at a time.')}")
     st.write(task["prompt"])
