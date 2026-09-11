@@ -59,6 +59,14 @@ SCENARIO_ART = {
     "Castle Gate": "castle-gate-quest.png",
 }
 
+# Version the game track so prior Coding Lab attempts remain available for
+# reports while a learner can start this redesigned PyQuest journey at zero.
+PYQUEST_CATEGORY_PREFIX = "pyquest_v2:"
+
+
+def _pyquest_category(stage_key: str) -> str:
+    return PYQUEST_CATEGORY_PREFIX + str(stage_key)
+
 
 def _scenario_for(concept: str, level: str, completed: int) -> dict[str, str]:
     """Map a generated Python concept to a reusable story world."""
@@ -95,21 +103,6 @@ def _render_scenario_art(scenario: dict[str, str]) -> None:
     image_path = Path(__file__).resolve().parents[2] / "assets" / filename
     if image_path.exists():
         st.image(str(image_path), caption="Mission scene · {}".format(scenario["name"]), use_container_width=True)
-
-
-def _render_game_hud(completed: int, coins: int) -> None:
-    """Render the original Python Quest HUD above the playable map."""
-    level = max(1, completed // 6 + 1)
-    xp = min(100, (completed % 6) * 16 + 8)
-    st.markdown(
-        f"""<style>
-        .pyquest-hud {{background:linear-gradient(115deg,#042c5a,#075e9b 55%,#073d70);border:2px solid #50cfff;border-radius:22px;padding:1rem 1.25rem;color:#fff;box-shadow:0 10px 22px #001c3a55;margin:.2rem 0 .8rem}}
-        .pyquest-title {{font-size:1.65rem;font-weight:900;letter-spacing:.04em;color:#ffd44d;text-shadow:2px 2px #092148}} .pyquest-tag {{font-size:.82rem;color:#c9efff}}
-        .hud-stat {{background:#082244;border:1px solid #3fc7ff;border-radius:14px;padding:.45rem .75rem;font-weight:800;text-align:center;color:#fff}} .hud-stat b {{color:#ffd548;font-size:1.15rem}}
-        .xp-track {{height:9px;background:#081f3b;border-radius:8px;overflow:hidden;margin-top:.35rem}} .xp-fill {{height:100%;width:{xp}%;background:linear-gradient(90deg,#9cf52f,#ffe34a);border-radius:8px}}
-        </style><div class='pyquest-hud'><div style='display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap'><div><div class='pyquest-title'>🐍 PYQUEST</div><div class='pyquest-tag'>Code. Solve. Level Up.</div></div><div style='min-width:210px'><b>Level {level}</b> · {completed} verified quests<div class='xp-track'><div class='xp-fill'></div></div><small>{xp}/100 XP to the next level</small></div><div style='display:flex;gap:.5rem'><div class='hud-stat'>🪙 <b>{coins}</b><br><small>coins</small></div><div class='hud-stat'>⚡ <b>5/5</b><br><small>focus</small></div></div></div></div>""",
-        unsafe_allow_html=True,
-    )
 
 
 def _render_journey(completed: int) -> None:
@@ -343,8 +336,11 @@ def run_coding_agent(action: str, **state: Any) -> dict[str, Any]:
 def _count_completed(user_id: int) -> int:
     conn = get_connection()
     try:
-        row = conn.execute("SELECT COUNT(DISTINCT question_key) AS total FROM coding_lab_attempts WHERE user_id = ? AND passed = 1", (user_id,)).fetchone()
-        return int(row["total"]) if row else 0
+        rows = conn.execute(
+            "SELECT question_key, category FROM coding_lab_attempts WHERE user_id = ? AND passed = 1",
+            (user_id,),
+        ).fetchall()
+        return len({str(row["question_key"]) for row in rows if str(row.get("category", "")).startswith(PYQUEST_CATEGORY_PREFIX)})
     finally:
         conn.close()
 
@@ -355,7 +351,7 @@ def _count_stage_completed(user_id: int, stage_key: str) -> int:
     try:
         row = conn.execute(
             "SELECT COUNT(DISTINCT question_key) AS total FROM coding_lab_attempts WHERE user_id = ? AND category = ? AND passed = 1",
-            (user_id, stage_key),
+            (user_id, _pyquest_category(stage_key)),
         ).fetchone()
         return int(row["total"]) if row else 0
     finally:
@@ -396,8 +392,11 @@ def _stage_scenario(stage: dict[str, str], completed: int) -> dict[str, str]:
 def _count_unlocks(user_id: int) -> int:
     conn = get_connection()
     try:
-        row = conn.execute("SELECT COUNT(*) AS count FROM coding_lab_attempts WHERE user_id = ? AND feedback = ?", (user_id, "solution_unlock")).fetchone()
-        return int(row["count"]) if row else 0
+        rows = conn.execute(
+            "SELECT category FROM coding_lab_attempts WHERE user_id = ? AND feedback = ?",
+            (user_id, "solution_unlock"),
+        ).fetchall()
+        return sum(1 for row in rows if str(row.get("category", "")).startswith(PYQUEST_CATEGORY_PREFIX))
     finally:
         conn.close()
 
@@ -421,7 +420,7 @@ def _consecutive_stage_failures(user_id: int, stage_key: str) -> int:
     try:
         rows = conn.execute(
             "SELECT passed FROM coding_lab_attempts WHERE user_id = ? AND category = ? ORDER BY id DESC LIMIT 3",
-            (user_id, stage_key),
+            (user_id, _pyquest_category(stage_key)),
         ).fetchall()
         failures = 0
         for row in rows:
@@ -536,7 +535,7 @@ def _start_stage_quest(user_id: int, stage: dict[str, str], completed: int, sess
     if not task:
         st.warning(result.get("error", "The planner did not return a challenge. Please try again."))
         return
-    task["category"] = stage["key"]
+    task["category"] = _pyquest_category(stage["key"])
     task["mastery_stage"] = stage["key"]
     task["scenario"] = scenario
     st.session_state[session_key] = task
@@ -555,7 +554,6 @@ def render_coding_lab() -> None:
     completed = _count_completed(user_id)
     coins = max(0, completed // 3 - _count_unlocks(user_id))
     progress_in_coin_cycle = completed % 3
-    _render_game_hud(completed, coins)
     st.markdown("<div style='display:flex;justify-content:space-between;align-items:center'><h3 style='margin:.25rem 0;color:#073b70'>🗺️ Your Python Quest Map</h3><span style='background:#fff0a1;padding:.35rem .75rem;border-radius:99px;color:#5a3800;font-weight:700'>Complete quests · collect coins · unlock worlds</span></div>", unsafe_allow_html=True)
     _render_interactive_game(completed, coins)
 
