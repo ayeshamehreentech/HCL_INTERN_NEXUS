@@ -60,11 +60,11 @@ def save_helping_bot_memory(user_id, kind, payload):
     )
 
 
-def save_helping_bot_document(user_id, filename, mime_type, text):
-    """Persist extracted text for one student's private RAG corpus.
+def save_helping_bot_document(user_id, filename, mime_type, text, vector_index=None):
+    """Persist extracted text and optional vectors for a student's private corpus.
 
     The original binary is never written to the chat table.  Keeping extracted
-    text only makes the document searchable while avoiding accidental storage
+    text and derived vectors makes the document searchable without storage
     of an executable or oversized attachment.
     """
     clean_text = str(text or "").strip()
@@ -77,6 +77,8 @@ def save_helping_bot_document(user_id, filename, mime_type, text):
         "text": clean_text[:MAX_RAG_DOCUMENT_CHARACTERS],
         "saved_at": datetime.now(timezone.utc).isoformat(),
     }
+    if vector_index is not None:
+        record["vector_index"] = vector_index
     return save_helping_bot_message(
         user_id,
         "assistant",
@@ -87,7 +89,14 @@ def save_helping_bot_document(user_id, filename, mime_type, text):
 def list_helping_bot_documents(user_id, limit=24):
     """Load private, previously extracted RAG documents for a student."""
     documents = []
-    for row in list_helping_bot_messages(user_id, limit=500):
+    try:
+        response = (_client().table("helping_bot_messages").select("content")
+                    .eq("user_id", int(user_id)).like("content", RAG_DOCUMENT_PREFIX + "%")
+                    .order("created_at", desc=True).limit(limit).execute())
+        rows = list(reversed(response.data or []))
+    except Exception:
+        return []
+    for row in rows:
         content = str(row.get("content", ""))
         if not content.startswith(RAG_DOCUMENT_PREFIX):
             continue
