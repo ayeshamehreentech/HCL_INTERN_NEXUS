@@ -259,5 +259,3 @@ def render_student_dashboard():
             lambda _: render_coding_lab(),
         )
 
-    with st.expander("View student dashboard middleware trace"):
-        st.json(student_trace.events)
